@@ -76,7 +76,7 @@ class OnDeviceTestsGatewayClient():
             archive_path=args.archive_path,
             config=args.config,
             tag=args.tag,
-            label=args.label,
+            labels=args.label,
             builder_name=args.builder_name,
             change_id=args.change_id,
             build_number=args.build_number,
@@ -85,6 +85,7 @@ class OnDeviceTestsGatewayClient():
             version=args.version,
             dry_run=args.dry_run,
             dimension=args.dimension or [],
+            unittest_shard_index=args.unittest_shard_index,
         )):
 
       print(response_line.response)
@@ -100,6 +101,7 @@ class OnDeviceTestsGatewayClient():
         on_device_tests_gateway_pb2.OnDeviceTestsWatchCommand(
             workdir=workdir,
             token=args.token,
+            change_id=args.change_id,
             session_id=args.session_id,
         )):
 
@@ -128,6 +130,12 @@ def main():
       '--dry_run',
       action='store_true',
       help='Specifies to show what would be done without actually doing it.')
+  parser.add_argument(
+      '-i',
+      '--change_id',
+      type=str,
+      help='ChangeId that triggered this test, if any. '
+      'Saved with performance test results.')
 
   subparsers = parser.add_subparsers(
       dest='action', help='On-Device tests commands', required=True)
@@ -170,6 +178,8 @@ def main():
       '-l',
       '--label',
       type=str,
+      default=[],
+      action='append',
       help='Additional labels to assign to the test.')
   trigger_parser.add_argument(
       '-b',
@@ -177,12 +187,6 @@ def main():
       type=str,
       help='Name of the builder that built the artifacts, '
       'if any. Saved with performance test results')
-  trigger_parser.add_argument(
-      '-i',
-      '--change_id',
-      type=str,
-      help='ChangeId that triggered this test, if any. '
-      'Saved with performance test results.')
   trigger_parser.add_argument(
       '-n',
       '--build_number',
@@ -211,6 +215,13 @@ def main():
       type=str,
       default='COBALT',
       help='Cobalt version being tested.')
+  trigger_parser.add_argument(
+      '--unittest_shard_index',
+      type=str,
+      required=False,
+      help='Optional argument to specify which unit testing shard to run in '
+      'the On-Device Tests Job. Defaults behavior is to run all tests without '
+      'sharding enabled.')
 
   watch_parser = subparsers.add_parser('watch', help='Trigger On-Device tests')
   watch_parser.add_argument(

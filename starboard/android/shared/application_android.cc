@@ -19,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -160,6 +161,7 @@ SbWindow ApplicationAndroid::CreateWindow(const SbWindowOptions* options) {
   if (SbWindowIsValid(window_)) {
     return kSbWindowInvalid;
   }
+  ScopedLock lock(input_mutex_);
   window_ = new SbWindowPrivate;
   window_->native_window = native_window_;
   input_events_generator_.reset(new InputEventsGenerator(window_));
@@ -171,6 +173,7 @@ bool ApplicationAndroid::DestroyWindow(SbWindow window) {
     return false;
   }
 
+  ScopedLock lock(input_mutex_);
   input_events_generator_.reset();
 
   SB_DCHECK(window == window_);
@@ -180,12 +183,21 @@ bool ApplicationAndroid::DestroyWindow(SbWindow window) {
 }
 
 Event* ApplicationAndroid::WaitForSystemEventWithTimeout(SbTime time) {
+  // Limit the polling time in case some non-system event is injected.
+  const int kMaxPollingTimeMillisecond = 10;
+
   // Convert from microseconds to milliseconds, taking the ceiling value.
   // If we take the floor, or round, then we end up busy looping every time
   // the next event time is less than one millisecond.
   int timeout_millis = (time + kSbTimeMillisecond - 1) / kSbTimeMillisecond;
   int looper_events;
-  int ident = ALooper_pollAll(timeout_millis, NULL, &looper_events, NULL);
+  int ident = ALooper_pollAll(
+      std::min(std::max(timeout_millis, 0), kMaxPollingTimeMillisecond), NULL,
+      &looper_events, NULL);
+
+  // Ignore new system events while processing one.
+  handle_system_events_ = false;
+
   switch (ident) {
     case kLooperIdAndroidCommand:
       ProcessAndroidCommand();
@@ -194,6 +206,8 @@ Event* ApplicationAndroid::WaitForSystemEventWithTimeout(SbTime time) {
       ProcessKeyboardInject();
       break;
   }
+
+  handle_system_events_ = true;
 
   // Always return NULL since we already dispatched our own system events.
   return NULL;
@@ -273,12 +287,16 @@ void ApplicationAndroid::ProcessAndroidCommand() {
       // early in SendAndroidCommand().
       {
         ScopedLock lock(android_command_mutex_);
-        // Cobalt can't keep running without a window, even if the Activity
-        // hasn't stopped yet. Block until conceal event has been processed.
+// Cobalt can't keep running without a window, even if the Activity
+// hasn't stopped yet. Block until conceal event has been processed.
 
-        // Only process injected events -- don't check system events since
-        // that may try to acquire the already-locked android_command_mutex_.
+// Only process injected events -- don't check system events since
+// that may try to acquire the already-locked android_command_mutex_.
+#if SB_API_VERSION >= 13
         InjectAndProcess(kSbEventTypeConceal, /* checkSystemEvents */ false);
+#else
+        InjectAndProcess(kSbEventTypeSuspend, /* checkSystemEvents */ false);
+#endif
 
         if (window_) {
           window_->native_window = NULL;
@@ -315,10 +333,12 @@ void ApplicationAndroid::ProcessAndroidCommand() {
     }
 
     // Remember the Android activity state to sync to when we have a window.
+    case AndroidCommand::kStop:
+      SbAtomicNoBarrier_Increment(&android_stop_count_, -1);
+    // Intentional fall-through.
     case AndroidCommand::kStart:
     case AndroidCommand::kResume:
     case AndroidCommand::kPause:
-    case AndroidCommand::kStop:
       sync_state = activity_state_ = cmd.type;
       break;
     case AndroidCommand::kDeepLink: {
@@ -344,9 +364,16 @@ void ApplicationAndroid::ProcessAndroidCommand() {
     }
   }
 
+  // If there's an outstanding "stop" command, then don't update the app state
+  // since it'll be overridden by the upcoming "stop" state.
+  if (SbAtomicNoBarrier_Load(&android_stop_count_) > 0) {
+    return;
+  }
+
   // If there's a window, sync the app state to the Activity lifecycle.
   if (native_window_) {
     switch (sync_state) {
+#if SB_API_VERSION >= 13
       case AndroidCommand::kStart:
         Inject(new Event(kSbEventTypeReveal, NULL, NULL));
         break;
@@ -359,6 +386,20 @@ void ApplicationAndroid::ProcessAndroidCommand() {
       case AndroidCommand::kStop:
         Inject(new Event(kSbEventTypeConceal, NULL, NULL));
         break;
+#else
+      case AndroidCommand::kStart:
+        Inject(new Event(kSbEventTypeResume, NULL, NULL));
+        break;
+      case AndroidCommand::kResume:
+        Inject(new Event(kSbEventTypeUnpause, NULL, NULL));
+        break;
+      case AndroidCommand::kPause:
+        Inject(new Event(kSbEventTypePause, NULL, NULL));
+        break;
+      case AndroidCommand::kStop:
+        Inject(new Event(kSbEventTypeSuspend, NULL, NULL));
+        break;
+#endif
       default:
         break;
     }
@@ -379,6 +420,9 @@ void ApplicationAndroid::SendAndroidCommand(AndroidCommand::CommandType type,
         android_command_condition_.Wait();
       }
       break;
+    case AndroidCommand::kStop:
+      SbAtomicNoBarrier_Increment(&android_stop_count_, 1);
+      break;
     default:
       break;
   }
@@ -387,6 +431,11 @@ void ApplicationAndroid::SendAndroidCommand(AndroidCommand::CommandType type,
 bool ApplicationAndroid::SendAndroidMotionEvent(
     const GameActivityMotionEvent* event) {
   bool result = false;
+
+  ScopedLock lock(input_mutex_);
+  if (!input_events_generator_) {
+    return false;
+  }
 
   // add motion event into the queue.
   InputEventsGenerator::Events app_events;
@@ -410,6 +459,11 @@ bool ApplicationAndroid::SendAndroidKeyEvent(
   }
 #endif
 
+  ScopedLock lock(input_mutex_);
+  if (!input_events_generator_) {
+    return false;
+  }
+
   // Add key event to the application queue.
   InputEventsGenerator::Events app_events;
   result = input_events_generator_->CreateInputEventsFromGameActivityEvent(
@@ -426,6 +480,7 @@ void ApplicationAndroid::ProcessKeyboardInject() {
   int err = read(keyboard_inject_readfd_, &key, sizeof(key));
   SB_DCHECK(err >= 0) << "Keyboard inject read failed: errno=" << errno;
   SB_LOG(INFO) << "Keyboard inject: " << key;
+  ScopedLock lock(input_mutex_);
   if (!input_events_generator_) {
     SB_DLOG(WARNING) << "Injected input event ignored without an SbWindow.";
     return;

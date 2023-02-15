@@ -27,6 +27,7 @@ import threading
 import traceback
 
 from six.moves import cStringIO as StringIO
+from starboard.build import clang
 from starboard.tools import abstract_launcher
 from starboard.tools import build
 from starboard.tools import command_line
@@ -35,6 +36,8 @@ from starboard.tools.testing import build_tests
 from starboard.tools.testing import test_filter
 from starboard.tools.testing.test_sharding import ShardingTestConfig
 from starboard.tools.util import SetupDefaultLoggingConfig
+
+# pylint: disable=consider-using-f-string
 
 _FLAKY_RETRY_LIMIT = 4
 _TOTAL_TESTS_REGEX = re.compile(r"^\[==========\] (.*) tests? from .*"
@@ -282,7 +285,8 @@ class TestRunner(object):
     # Read the sharding configuration from deployed sharding configuration json.
     # Create subset of test targets, and launch params per target.
     try:
-      self.sharding_test_config = ShardingTestConfig(self.platform)
+      self.sharding_test_config = ShardingTestConfig(self.platform,
+                                                     self.test_targets)
     except RuntimeError:
       self.sharding_test_config = None
 
@@ -639,6 +643,7 @@ class TestRunner(object):
 
       actual_failed_count = len(actual_failed_tests)
       flaky_failed_count = len(flaky_failed_tests)
+      initial_flaky_failed_count = flaky_failed_count
       filtered_count = len(filtered_tests)
 
       # If our math does not agree with gtest...
@@ -648,9 +653,9 @@ class TestRunner(object):
 
       # Retry the flaky test cases that failed, and mark them as passed if they
       # succeed within the retry limit.
+      flaky_passed_tests = []
       if flaky_failed_count > 0:
         logging.info("RE-RUNNING FLAKY TESTS.\n")
-        flaky_passed_tests = []
         for test_case in flaky_failed_tests:
           for retry in range(_FLAKY_RETRY_LIMIT):
             # Sometimes the returned test "name" includes information about the
@@ -673,9 +678,13 @@ class TestRunner(object):
 
       test_status = "SUCCEEDED"
 
+      all_flaky_tests_succeeded = initial_flaky_failed_count == len(
+          flaky_passed_tests)
+
       # Always mark as FAILED if we have a non-zero return code, or failing
       # test.
-      if return_code != 0 or actual_failed_count > 0 or flaky_failed_count > 0:
+      if ((return_code != 0 and not all_flaky_tests_succeeded) or
+          actual_failed_count > 0 or flaky_failed_count > 0):
         error = True
         test_status = "FAILED"
         failed_test_groups.append(target_name)
@@ -794,7 +803,7 @@ class TestRunner(object):
     for test_target in sorted(self.test_targets.keys()):
       if (self.shard_index is not None) and self.sharding_test_config:
         (run_action, sub_shard_index,
-         sub_shard_count) = self.sharding_test_config.GetTestRunConfig(
+         sub_shard_count) = self.sharding_test_config.get_test_run_config(
              test_target, self.shard_index)
         if run_action == ShardingTestConfig.RUN_FULL_TEST:
           logging.info("SHARD %d RUNS TEST %s (full)", self.shard_index,
@@ -830,17 +839,21 @@ class TestRunner(object):
     if not available_profraw_files:
       return
 
+    toolchain_dir = build.GetClangBinPath(clang.GetClangSpecification())
+
     report_name = "report"
     profdata_name = os.path.join(self.coverage_directory,
                                  report_name + ".profdata")
     merge_cmd_list = [
-        "llvm-profdata", "merge", "-sparse=true", "-o", profdata_name
+        os.path.join(toolchain_dir, "llvm-profdata"), "merge", "-sparse=true",
+        "-o", profdata_name
     ]
     merge_cmd_list += available_profraw_files
 
     self._Exec(merge_cmd_list)
     show_cmd_list = [
-        "llvm-cov", "show", "-instr-profile=" + profdata_name, "-format=html",
+        os.path.join(toolchain_dir, "llvm-cov"), "show",
+        "-instr-profile=" + profdata_name, "-format=html",
         "-output-dir=" + os.path.join(self.coverage_directory, "html"),
         available_targets[0]
     ]
@@ -848,8 +861,8 @@ class TestRunner(object):
     self._Exec(show_cmd_list)
 
     report_cmd_list = [
-        "llvm-cov", "report", "-instr-profile=" + profdata_name,
-        available_targets[0]
+        os.path.join(toolchain_dir, "llvm-cov"), "report",
+        "-instr-profile=" + profdata_name, available_targets[0]
     ]
     report_cmd_list += ["-object=" + target for target in available_targets[1:]]
     self._Exec(

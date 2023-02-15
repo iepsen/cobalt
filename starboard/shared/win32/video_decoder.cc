@@ -150,7 +150,7 @@ scoped_ptr<MediaTransform> CreateVideoTransform(
   CheckResult(input_type->SetGUID(MF_MT_SUBTYPE, input_guid));
   CheckResult(input_type->SetUINT32(MF_MT_INTERLACE_MODE,
                                     MFVideoInterlace_Progressive));
-  if (input_guid == MFVideoFormat_VP90) {
+  if (input_guid == MFVideoFormat_VP90 || input_guid == MFVideoFormat_AV1) {
     // Set the expected video resolution. Setting the proper resolution can
     // mitigate a format change, but the decoder will adjust to the real
     // resolution regardless.
@@ -278,13 +278,14 @@ void VideoDecoder::Initialize(const DecoderStatusCB& decoder_status_cb,
   }
 }
 
-void VideoDecoder::WriteInputBuffer(
-    const scoped_refptr<InputBuffer>& input_buffer) {
+void VideoDecoder::WriteInputBuffers(const InputBuffers& input_buffers) {
   SB_DCHECK(thread_checker_.CalledOnValidThread());
-  SB_DCHECK(input_buffer);
+  SB_DCHECK(input_buffers.size() == 1);
+  SB_DCHECK(input_buffers[0]);
   SB_DCHECK(decoder_status_cb_);
   EnsureDecoderThreadRunning();
 
+  const auto& input_buffer = input_buffers[0];
   if (TryUpdateOutputForHdrVideo(input_buffer->video_sample_info())) {
     ScopedLock lock(thread_lock_);
     thread_events_.emplace_back(
@@ -440,7 +441,20 @@ void VideoDecoder::InitializeCodec() {
       }
       break;
     }
-    default: { SB_NOTREACHED(); }
+    case kSbMediaVideoCodecAv1: {
+      media_transform =
+          CreateVideoTransform(MFVideoFormat_AV1, MFVideoFormat_AV1,
+                               MFVideoFormat_NV12, device_manager_.Get());
+      priming_output_count_ = 0;
+      if (!media_transform) {
+        SB_LOG(WARNING) << "AV1 hardware decoder creation failed.";
+        return;
+      }
+      break;
+    }
+    default: {
+      SB_NOTREACHED();
+    }
   }
 
   decoder_.reset(
@@ -535,7 +549,7 @@ void VideoDecoder::EnsureDecoderThreadRunning() {
 
   // NOTE: The video decoder thread will exit after processing the
   // kWriteEndOfStream event. In this case, Reset must be called (which will
-  // then StopDecoderThread) before WriteInputBuffer or WriteEndOfStream again.
+  // then StopDecoderThread) before WriteInputBuffers or WriteEndOfStream again.
   SB_DCHECK(!decoder_thread_stopped_);
 
   if (!SbThreadIsValid(decoder_thread_)) {

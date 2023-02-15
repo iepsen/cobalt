@@ -54,6 +54,22 @@ std::string SerializeExcludingFragment(const GURL& url) {
 
 }  // namespace
 
+ServiceWorkerRegistrationMap::ServiceWorkerRegistrationMap(
+    const ServiceWorkerPersistentSettings::Options& options) {
+  service_worker_persistent_settings_.reset(
+      new ServiceWorkerPersistentSettings(options));
+  DCHECK(service_worker_persistent_settings_);
+
+  // TODO(b/259731731) For now do not read from persisted settings until
+  // activation of persisted registrations works.
+  ReadPersistentSettings();
+}
+
+void ServiceWorkerRegistrationMap::ReadPersistentSettings() {
+  service_worker_persistent_settings_->ReadServiceWorkerRegistrationMapSettings(
+      registration_map_);
+}
+
 scoped_refptr<ServiceWorkerRegistrationObject>
 ServiceWorkerRegistrationMap::MatchServiceWorkerRegistration(
     const url::Origin& storage_key, const GURL& client_url) {
@@ -113,7 +129,6 @@ ServiceWorkerRegistrationMap::MatchServiceWorkerRegistration(
                 url::Origin::Create(client_url));
     }
   }
-
   // 9. Return the result of running Get Registration given storage key and
   // matchingScope.
   return GetRegistration(storage_key, matching_scope);
@@ -140,7 +155,7 @@ ServiceWorkerRegistrationMap::GetRegistration(const url::Origin& storage_key,
     scope_string = SerializeExcludingFragment(scope);
   }
 
-  Key registration_key(storage_key, scope_string);
+  RegistrationMapKey registration_key(storage_key, scope_string);
   // 4. For each (entry storage key, entry scope) → registration of registration
   // map:
   for (const auto& entry : registration_map_) {
@@ -194,7 +209,7 @@ ServiceWorkerRegistrationMap::SetRegistration(
                                           update_via_cache));
 
   // 4. Set registration map[(storage key, scopeString)] to registration.
-  Key registration_key(storage_key, scope_string);
+  RegistrationMapKey registration_key(storage_key, scope_string);
   registration_map_.insert(std::make_pair(
       registration_key,
       scoped_refptr<ServiceWorkerRegistrationObject>(registration)));
@@ -207,11 +222,13 @@ void ServiceWorkerRegistrationMap::RemoveRegistration(
     const url::Origin& storage_key, const GURL& scope) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   std::string scope_string = SerializeExcludingFragment(scope);
-  Key registration_key(storage_key, scope_string);
+  RegistrationMapKey registration_key(storage_key, scope_string);
   auto entry = registration_map_.find(registration_key);
   DCHECK(entry != registration_map_.end());
   if (entry != registration_map_.end()) {
     registration_map_.erase(entry);
+    service_worker_persistent_settings_
+        ->RemoveServiceWorkerRegistrationObjectSettings(registration_key);
   }
 }
 
@@ -222,8 +239,10 @@ bool ServiceWorkerRegistrationMap::IsUnregistered(
   // is not this service worker registration.
   //   https://www.w3.org/TR/2022/CRD-service-workers-20220712/#dfn-service-worker-registration-unregistered
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  Key registration_key(registration->storage_key(),
-                       registration->scope_url().spec());
+  std::string scope_string =
+      SerializeExcludingFragment(registration->scope_url());
+  RegistrationMapKey registration_key(registration->storage_key(),
+                                      scope_string);
   auto entry = registration_map_.find(registration_key);
   if (entry == registration_map_.end()) return true;
 
@@ -268,12 +287,25 @@ void ServiceWorkerRegistrationMap::HandleUserAgentShutdown(
 }
 
 void ServiceWorkerRegistrationMap::AbortAllActive() {
-  for (auto& entry : registration_map_) {
-    const scoped_refptr<ServiceWorkerRegistrationObject>& registration =
-        entry.second;
-    if (registration->active_worker()) {
-      registration->active_worker()->Abort();
-    }
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  for (auto entry : registration_map_) {
+    entry.second->AbortAll();
+  }
+}
+
+void ServiceWorkerRegistrationMap::PersistRegistration(
+    const url::Origin& storage_key, const GURL& scope) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  std::string scope_string = SerializeExcludingFragment(scope);
+  RegistrationMapKey registration_key(storage_key, scope_string);
+  auto entry = registration_map_.find(registration_key);
+  if (entry != registration_map_.end()) {
+    service_worker_persistent_settings_
+        ->WriteServiceWorkerRegistrationObjectSettings(registration_key,
+                                                       entry->second);
+  } else {
+    service_worker_persistent_settings_
+        ->RemoveServiceWorkerRegistrationObjectSettings(registration_key);
   }
 }
 

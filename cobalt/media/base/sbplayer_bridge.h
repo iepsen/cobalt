@@ -18,6 +18,7 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
@@ -25,6 +26,7 @@
 #include "base/time/time.h"
 #include "cobalt/media/base/decode_target_provider.h"
 #include "cobalt/media/base/decoder_buffer_cache.h"
+#include "cobalt/media/base/sbplayer_interface.h"
 #include "cobalt/media/base/sbplayer_set_bounds_helper.h"
 #include "starboard/media.h"
 #include "starboard/player.h"
@@ -33,10 +35,6 @@
 #include "third_party/chromium/media/base/demuxer_stream.h"
 #include "third_party/chromium/media/base/video_decoder_config.h"
 #include "third_party/chromium/media/cobalt/ui/gfx/geometry/rect.h"
-
-#if SB_HAS(PLAYER_WITH_URL)
-#include SB_URL_PLAYER_INCLUDE_PATH
-#endif  // SB_HAS(PLAYER_WITH_URL)
 
 namespace cobalt {
 namespace media {
@@ -51,7 +49,8 @@ class SbPlayerBridge {
  public:
   class Host {
    public:
-    virtual void OnNeedData(DemuxerStream::Type type) = 0;
+    virtual void OnNeedData(DemuxerStream::Type type,
+                            int max_number_of_buffers_to_write) = 0;
     virtual void OnPlayerStatus(SbPlayerState state) = 0;
     virtual void OnPlayerError(SbPlayerError error,
                                const std::string& message) = 0;
@@ -68,7 +67,8 @@ class SbPlayerBridge {
   typedef base::Callback<void(const char*, const unsigned char*, unsigned)>
       OnEncryptedMediaInitDataEncounteredCB;
   // Create an SbPlayerBridge with url-based player.
-  SbPlayerBridge(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+  SbPlayerBridge(SbPlayerInterface* interface,
+                 const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
                  const std::string& url, SbWindow window, Host* host,
                  SbPlayerSetBoundsHelper* set_bounds_helper,
                  bool allow_resume_after_suspend, bool prefer_decode_to_texture,
@@ -77,7 +77,8 @@ class SbPlayerBridge {
                  DecodeTargetProvider* const decode_target_provider);
 #endif  // SB_HAS(PLAYER_WITH_URL)
   // Create a SbPlayerBridge with normal player
-  SbPlayerBridge(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+  SbPlayerBridge(SbPlayerInterface* interface,
+                 const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
                  const GetDecodeTargetGraphicsContextProviderFunc&
                      get_decode_target_graphics_context_provider_func,
                  const AudioDecoderConfig& audio_config,
@@ -99,8 +100,8 @@ class SbPlayerBridge {
   void UpdateVideoConfig(const VideoDecoderConfig& video_config,
                          const std::string& mime_type);
 
-  void WriteBuffer(DemuxerStream::Type type,
-                   const scoped_refptr<DecoderBuffer>& buffer);
+  void WriteBuffers(DemuxerStream::Type type,
+                    const std::vector<scoped_refptr<DecoderBuffer>>& buffers);
 
   void SetBounds(int z_index, const gfx::Rect& rect);
 
@@ -192,9 +193,11 @@ class SbPlayerBridge {
 #endif  // SB_HAS(PLAYER_WITH_URL)
   void CreatePlayer();
 
-  void WriteNextBufferFromCache(DemuxerStream::Type type);
-  void WriteBufferInternal(DemuxerStream::Type type,
-                           const scoped_refptr<DecoderBuffer>& buffer);
+  void WriteNextBuffersFromCache(DemuxerStream::Type type,
+                                 int max_buffers_per_write);
+  void WriteBuffersInternal(
+      DemuxerStream::Type type,
+      const std::vector<scoped_refptr<DecoderBuffer>>& buffers);
 
   void GetInfo_Locked(uint32* video_frames_decoded,
                       uint32* video_frames_dropped,
@@ -220,7 +223,7 @@ class SbPlayerBridge {
                                  const void* sample_buffer);
 
 #if SB_HAS(PLAYER_WITH_URL)
-  static SbPlayerOutputMode ComputeSbUrlPlayerOutputMode(
+  SbPlayerOutputMode ComputeSbUrlPlayerOutputMode(
       bool prefer_decode_to_texture);
 #endif  // SB_HAS(PLAYER_WITH_URL)
   // Returns the output mode that should be used for a video with the given
@@ -234,6 +237,7 @@ class SbPlayerBridge {
 #if SB_HAS(PLAYER_WITH_URL)
   std::string url_;
 #endif  // SB_HAS(PLAYER_WITH_URL)
+  SbPlayerInterface* sbplayer_interface_;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   const GetDecodeTargetGraphicsContextProviderFunc
       get_decode_target_graphics_context_provider_func_;
@@ -299,6 +303,10 @@ class SbPlayerBridge {
 #if SB_HAS(PLAYER_WITH_URL)
   const bool is_url_based_;
 #endif  // SB_HAS(PLAYER_WITH_URL)
+
+  // Used for Gathered Sample Write.
+  bool pending_audio_eos_buffer_ = false;
+  bool pending_video_eos_buffer_ = false;
 };
 
 }  // namespace media

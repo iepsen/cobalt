@@ -33,9 +33,7 @@ namespace worker {
 
 ServiceWorker::ServiceWorker(script::EnvironmentSettings* settings,
                              worker::ServiceWorkerObject* worker)
-    : web::EventTarget(settings),
-      worker_(worker),
-      state_(kServiceWorkerStateParsed) {}
+    : web::EventTarget(settings), worker_(worker) {}
 
 void ServiceWorker::PostMessage(const script::ValueHandleHolder& message) {
   // Algorithm for ServiceWorker.postMessage():
@@ -55,8 +53,7 @@ void ServiceWorker::PostMessage(const script::ValueHandleHolder& message) {
     return;
   }
   // 5. If the result of running the Should Skip Event algorithm with
-  // "message"
-  //    and serviceWorker is true, then return.
+  // "message" and serviceWorker is true, then return.
   if (service_worker->ShouldSkipEvent(base::Tokens::message())) return;
   // 6. Run these substeps in parallel:
   ServiceWorkerJobs* jobs =
@@ -66,7 +63,7 @@ void ServiceWorker::PostMessage(const script::ValueHandleHolder& message) {
       FROM_HERE,
       base::BindOnce(&ServiceWorkerJobs::ServiceWorkerPostMessageSubSteps,
                      base::Unretained(jobs), base::Unretained(service_worker),
-                     base::Unretained(incumbent_settings),
+                     base::Unretained(incumbent_settings->context()),
                      std::move(serialize_result)));
 }
 

@@ -104,6 +104,7 @@ public class StarboardBridge {
 
   private final HashMap<String, CobaltService.Factory> cobaltServiceFactories = new HashMap<>();
   private final HashMap<String, CobaltService> cobaltServices = new HashMap<>();
+  private final HashMap<String, String> crashContext = new HashMap<>();
 
   private static final TimeZone DEFAULT_TIME_ZONE = TimeZone.getTimeZone("America/Los_Angeles");
   private final long timeNanosecondsPerMicrosecond = 1000;
@@ -227,6 +228,7 @@ public class StarboardBridge {
     for (CobaltService service : cobaltServices.values()) {
       service.beforeStartOrResume();
     }
+    advertisingId.refresh();
   }
 
   @SuppressWarnings("unused")
@@ -807,5 +809,25 @@ public class StarboardBridge {
           - (javaStartTimestamp - javaStopTimestamp) / timeNanosecondsPerMicrosecond;
     }
     return 0;
+  }
+
+  @SuppressWarnings("unused")
+  @UsedByNative
+  void reportFullyDrawn() {
+    Activity activity = activityHolder.get();
+    if (activity != null) {
+      activity.reportFullyDrawn();
+    }
+  }
+
+  @SuppressWarnings("unused")
+  @UsedByNative
+  public void setCrashContext(String key, String value) {
+    Log.i(TAG, "setCrashContext Called: " + key + ", " + value);
+    crashContext.put(key, value);
+  }
+
+  public HashMap<String, String> getCrashContext() {
+    return this.crashContext;
   }
 }

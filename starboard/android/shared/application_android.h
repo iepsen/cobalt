@@ -21,11 +21,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "game-activity/GameActivity.h"
 #include "starboard/android/shared/input_events_generator.h"
 #ifdef STARBOARD_INPUT_EVENTS_FILTER
 #include "starboard/android/shared/internal/input_events_filter.h"
 #endif
 #include "starboard/android/shared/jni_env_ext.h"
+#include "starboard/atomic.h"
 #include "starboard/common/condition_variable.h"
 #include "starboard/common/mutex.h"
 #include "starboard/common/scoped_ptr.h"
@@ -34,7 +36,6 @@
 #include "starboard/shared/starboard/application.h"
 #include "starboard/shared/starboard/queue_application.h"
 #include "starboard/types.h"
-#include "third_party/android_game_activity/include/game-activity/GameActivity.h"
 
 namespace starboard {
 namespace android {
@@ -75,8 +76,13 @@ class ApplicationAndroid
   bool OnSearchRequested();
   void HandleDeepLink(const char* link_url);
   void SendTTSChangedEvent() {
+#if SB_API_VERSION >= 13
     Inject(new Event(kSbEventTypeAccessibilityTextToSpeechSettingsChanged,
                      nullptr, nullptr));
+#else
+    Inject(new Event(kSbEventTypeAccessiblityTextToSpeechSettingsChanged,
+                     nullptr, nullptr));
+#endif
   }
 
   void SendAndroidCommand(AndroidCommand::CommandType type, void* data);
@@ -124,7 +130,7 @@ class ApplicationAndroid
   void OnSuspend() override;
 
   // --- QueueApplication overrides ---
-  bool MayHaveSystemEvents() override { return true; }
+  bool MayHaveSystemEvents() override { return handle_system_events_; }
   Event* WaitForSystemEventWithTimeout(SbTime time) override;
   void WakeSystemEventWait() override;
 
@@ -138,10 +144,18 @@ class ApplicationAndroid
   int keyboard_inject_readfd_;
   int keyboard_inject_writefd_;
 
+  // In certain situations, the Starboard thread should not try to process new
+  // system events (e.g. while one is being processed).
+  bool handle_system_events_ = true;
+
   // Synchronization for commands that change availability of Android resources
   // such as the input and/or native_window_.
   Mutex android_command_mutex_;
   ConditionVariable android_command_condition_;
+
+  // Track queued "stop" commands to avoid starting the app when Android has
+  // already requested it be stopped.
+  SbAtomic32 android_stop_count_ = 0;
 
   // The last Activity lifecycle state command received.
   AndroidCommand::CommandType activity_state_;
@@ -149,6 +163,9 @@ class ApplicationAndroid
   // The single open window, if any.
   SbWindow window_;
 
+  // |input_events_generator_| is accessed from multiple threads, so use a mutex
+  // to safely access it.
+  Mutex input_mutex_;
   scoped_ptr<InputEventsGenerator> input_events_generator_;
 
 #ifdef STARBOARD_INPUT_EVENTS_FILTER

@@ -61,6 +61,7 @@
 #include "cobalt/math/size.h"
 #include "cobalt/media/base/decode_target_provider.h"
 #include "cobalt/media/base/pipeline.h"
+#include "cobalt/media/base/sbplayer_interface.h"
 #include "cobalt/media/player/web_media_player.h"
 #include "cobalt/media/player/web_media_player_delegate.h"
 #include "third_party/chromium/media/base/demuxer.h"
@@ -102,12 +103,13 @@ class WebMediaPlayerImpl : public WebMediaPlayer,
   // When calling this, the |audio_source_provider| and
   // |audio_renderer_sink| arguments should be the same object.
 
-  WebMediaPlayerImpl(PipelineWindow window,
+  WebMediaPlayerImpl(SbPlayerInterface* interface, PipelineWindow window,
                      const Pipeline::GetDecodeTargetGraphicsContextProviderFunc&
                          get_decode_target_graphics_context_provider_func,
                      WebMediaPlayerClient* client,
                      WebMediaPlayerDelegate* delegate,
                      bool allow_resume_after_suspend,
+                     bool allow_batched_sample_write,
                      ::media::MediaLog* const media_log);
   ~WebMediaPlayerImpl() override;
 
@@ -115,9 +117,8 @@ class WebMediaPlayerImpl : public WebMediaPlayer,
   void LoadUrl(const GURL& url) override;
 #endif  // SB_HAS(PLAYER_WITH_URL)
   void LoadMediaSource() override;
-  void LoadProgressive(
-      const GURL& url,
-      std::unique_ptr<BufferedDataSource> data_source) override;
+  void LoadProgressive(const GURL& url,
+                       std::unique_ptr<DataSource> data_source) override;
 
   void CancelLoad() override;
 
@@ -165,9 +166,6 @@ class WebMediaPlayerImpl : public WebMediaPlayer,
   ReadyState GetReadyState() const override;
 
   bool DidLoadingProgress() const override;
-
-  bool HasSingleSecurityOrigin() const override;
-  bool DidPassCORSAccessCheck() const override;
 
   float MediaTimeForTimeValue(float timeValue) const override;
 
@@ -292,6 +290,7 @@ class WebMediaPlayerImpl : public WebMediaPlayer,
   WebMediaPlayerClient* const client_;
   WebMediaPlayerDelegate* const delegate_;
   const bool allow_resume_after_suspend_;
+  const bool allow_batched_sample_write_;
   scoped_refptr<DecodeTargetProvider> decode_target_provider_;
 
   scoped_refptr<WebMediaPlayerProxy> proxy_;
