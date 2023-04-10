@@ -19,8 +19,10 @@
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "cobalt/script/v8c/conversion_helpers.h"
+#include "cobalt/script/v8c/native_promise.h"
 #include "cobalt/web/environment_settings_helper.h"
 #include "starboard/common/murmurhash2.h"
 
@@ -324,6 +326,59 @@ base::Optional<v8::Local<v8::Value>> Then(v8::Local<v8::Value> value,
   return resulting_promise.ToLocalChecked();
 }
 
+void Resolve(v8::Local<v8::Promise::Resolver> resolver,
+             v8::Local<v8::Value> value) {
+  auto* isolate = resolver->GetIsolate();
+  script::v8c::EntryScope entry_scope(isolate);
+  auto context = isolate->GetCurrentContext();
+  if (value.IsEmpty()) {
+    value = v8::Undefined(isolate);
+  }
+  auto result = resolver->Resolve(context, value);
+  DCHECK(result.FromJust());
+}
+
+void Reject(v8::Local<v8::Promise::Resolver> resolver) {
+  auto* isolate = resolver->GetIsolate();
+  script::v8c::EntryScope entry_scope(isolate);
+  auto context = isolate->GetCurrentContext();
+  auto result = resolver->Reject(context, v8::Undefined(isolate));
+  DCHECK(result.FromJust());
+}
+
+script::HandlePromiseAny FromResolver(
+    v8::Local<v8::Promise::Resolver> resolver) {
+  auto* isolate = resolver->GetIsolate();
+  return script::HandlePromiseAny(
+      new script::v8c::V8cUserObjectHolder<
+          script::v8c::NativePromise<script::Any>>(isolate, resolver));
+}
+
+void Trace(v8::Isolate* isolate,
+           std::initializer_list<v8::Local<v8::Value>> values,
+           std::vector<v8::TracedGlobal<v8::Value>*>& traced_globals_out,
+           base::OnceClosure& cleanup_traced) {
+  auto heap_tracer =
+      script::v8c::V8cEngine::GetFromIsolate(isolate)->heap_tracer();
+  std::vector<std::unique_ptr<v8::TracedGlobal<v8::Value>>> traced_globals;
+  for (auto value : values) {
+    auto traced_global =
+        std::make_unique<v8::TracedGlobal<v8::Value>>(isolate, value);
+    heap_tracer->AddRoot(traced_global.get());
+    traced_globals_out.push_back(traced_global.get());
+    traced_globals.push_back(std::move(traced_global));
+  }
+  cleanup_traced = base::BindOnce(
+      [](script::v8c::V8cHeapTracer* heap_tracer,
+         std::vector<std::unique_ptr<v8::TracedGlobal<v8::Value>>>
+             traced_globals) {
+        for (int i = 0; i < traced_globals.size(); i++) {
+          heap_tracer->RemoveRoot(traced_globals[i].get());
+        }
+      },
+      heap_tracer, std::move(traced_globals));
+}
+
 script::Any FromV8Value(v8::Isolate* isolate, v8::Local<v8::Value> value) {
   return script::Any(new script::v8c::V8cValueHandleHolder(isolate, value));
 }
@@ -356,8 +411,27 @@ base::Optional<v8::Local<v8::Value>> CreateInstance(
 }
 
 base::Optional<v8::Local<v8::Value>> CreateRequest(v8::Isolate* isolate,
-                                                   const std::string& url) {
-  return CreateInstance(isolate, "Request", {V8String(isolate, url)});
+                                                   const std::string& url,
+                                                   const base::Value& options) {
+  auto v8_options = v8::Object::New(isolate);
+  auto mode = options.FindKey("mode");
+  if (mode) {
+    Set(v8_options, "mode", V8String(isolate, mode->GetString()));
+  }
+  auto headers = options.FindKey("headers");
+  if (headers) {
+    auto v8_headers = v8::Object::New(isolate);
+    for (const auto& header : headers->GetList()) {
+      const auto& pair = header.GetList();
+      DCHECK(pair.size() == 2);
+      auto name = pair[0].GetString();
+      auto value = pair[1].GetString();
+      Set(v8_headers, name, V8String(isolate, value));
+    }
+    Set(v8_options, "headers", v8_headers);
+  }
+  return CreateInstance(isolate, "Request",
+                        {V8String(isolate, url), v8_options});
 }
 
 base::Optional<v8::Local<v8::Value>> CreateResponse(

@@ -17,6 +17,7 @@
 #include "starboard/audio_sink.h"
 #include "starboard/common/log.h"
 #include "starboard/directory.h"
+#include "starboard/extension/enhanced_audio.h"
 #include "starboard/shared/starboard/media/media_support_internal.h"
 #include "starboard/shared/starboard/media/mime_type.h"
 #include "starboard/shared/starboard/player/filter/player_components.h"
@@ -140,7 +141,7 @@ std::vector<const char*> GetSupportedAudioTestFiles(
 
       audio_file_info_cache.push_back(
           {filename, dmp_reader.audio_codec(),
-           dmp_reader.audio_sample_info().number_of_channels,
+           dmp_reader.audio_stream_info().number_of_channels,
            dmp_reader.audio_bitrate(), strstr(filename, "heaac") != nullptr});
     }
   }
@@ -201,17 +202,15 @@ std::vector<VideoTestParam> GetSupportedVideoTests() {
         continue;
       }
 
-      const auto& video_sample_info =
-          dmp_reader.GetPlayerSampleInfo(kSbMediaTypeVideo, 0)
-              .video_sample_info;
+      const auto& video_stream_info = dmp_reader.video_stream_info();
       const std::string video_mime = dmp_reader.video_mime_type();
       const MimeType video_mime_type(video_mime.c_str());
       if (SbMediaIsVideoSupported(
               dmp_reader.video_codec(),
               video_mime.size() > 0 ? &video_mime_type : nullptr, -1, -1, 8,
               kSbMediaPrimaryIdUnspecified, kSbMediaTransferIdUnspecified,
-              kSbMediaMatrixIdUnspecified, video_sample_info.frame_width,
-              video_sample_info.frame_height, dmp_reader.video_bitrate(),
+              kSbMediaMatrixIdUnspecified, video_stream_info.frame_width,
+              video_stream_info.frame_height, dmp_reader.video_bitrate(),
               dmp_reader.video_fps(), false)) {
         test_params.push_back(std::make_tuple(filename, output_mode));
       }
@@ -223,8 +222,7 @@ std::vector<VideoTestParam> GetSupportedVideoTests() {
 }
 
 bool CreateAudioComponents(bool using_stub_decoder,
-                           SbMediaAudioCodec codec,
-                           const SbMediaAudioSampleInfo& audio_sample_info,
+                           const media::AudioStreamInfo& audio_stream_info,
                            scoped_ptr<AudioDecoder>* audio_decoder,
                            scoped_ptr<AudioRendererSink>* audio_renderer_sink) {
   SB_CHECK(audio_decoder);
@@ -234,7 +232,7 @@ bool CreateAudioComponents(bool using_stub_decoder,
   audio_decoder->reset();
 
   PlayerComponents::Factory::CreationParameters creation_parameters(
-      codec, audio_sample_info);
+      audio_stream_info);
 
   scoped_ptr<PlayerComponents::Factory> factory;
   if (using_stub_decoder) {
@@ -264,22 +262,80 @@ AssertionResult AlmostEqualTime(SbTime time1, SbTime time2) {
          << "time " << time1 << " doesn't match with time " << time2;
 }
 
-media::VideoSampleInfo CreateVideoSampleInfo(SbMediaVideoCodec codec) {
-  shared::starboard::media::VideoSampleInfo video_sample_info = {};
+media::VideoStreamInfo CreateVideoStreamInfo(SbMediaVideoCodec codec) {
+  shared::starboard::media::VideoStreamInfo video_stream_info = {};
 
-  video_sample_info.codec = codec;
-  video_sample_info.mime = "";
-  video_sample_info.max_video_capabilities = "";
+  video_stream_info.codec = codec;
+  video_stream_info.mime = "";
+  video_stream_info.max_video_capabilities = "";
 
-  video_sample_info.color_metadata.primaries = kSbMediaPrimaryIdBt709;
-  video_sample_info.color_metadata.transfer = kSbMediaTransferIdBt709;
-  video_sample_info.color_metadata.matrix = kSbMediaMatrixIdBt709;
-  video_sample_info.color_metadata.range = kSbMediaRangeIdLimited;
+  video_stream_info.color_metadata.primaries = kSbMediaPrimaryIdBt709;
+  video_stream_info.color_metadata.transfer = kSbMediaTransferIdBt709;
+  video_stream_info.color_metadata.matrix = kSbMediaMatrixIdBt709;
+  video_stream_info.color_metadata.range = kSbMediaRangeIdLimited;
 
-  video_sample_info.frame_width = 1920;
-  video_sample_info.frame_height = 1080;
+  video_stream_info.frame_width = 1920;
+  video_stream_info.frame_height = 1080;
 
-  return video_sample_info;
+  return video_stream_info;
+}
+
+bool IsPartialAudioSupported() {
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  return true;
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  return SbSystemGetExtension(kCobaltExtensionEnhancedAudioName) != nullptr;
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+}
+
+scoped_refptr<InputBuffer> GetAudioInputBuffer(
+    video_dmp::VideoDmpReader* dmp_reader,
+    size_t index) {
+  SB_DCHECK(dmp_reader);
+
+  auto player_sample_info =
+      dmp_reader->GetPlayerSampleInfo(kSbMediaTypeAudio, index);
+  return new InputBuffer(StubDeallocateSampleFunc, nullptr, nullptr,
+                         player_sample_info);
+}
+
+scoped_refptr<InputBuffer> GetAudioInputBuffer(
+    video_dmp::VideoDmpReader* dmp_reader,
+    size_t index,
+    SbTime discarded_duration_from_front,
+    SbTime discarded_duration_from_back) {
+  SB_DCHECK(dmp_reader);
+  auto player_sample_info =
+      dmp_reader->GetPlayerSampleInfo(kSbMediaTypeAudio, index);
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  player_sample_info.audio_sample_info.discarded_duration_from_front =
+      discarded_duration_from_front;
+  player_sample_info.audio_sample_info.discarded_duration_from_back =
+      discarded_duration_from_back;
+  auto input_buffer = new InputBuffer(StubDeallocateSampleFunc, nullptr,
+                                      nullptr, player_sample_info);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  media::AudioSampleInfo audio_sample_info(
+      player_sample_info.audio_sample_info);
+  audio_sample_info.discarded_duration_from_front =
+      discarded_duration_from_front;
+  audio_sample_info.discarded_duration_from_back = discarded_duration_from_back;
+
+  CobaltExtensionEnhancedAudioPlayerSampleInfo enhanced_audio_sample_info;
+  enhanced_audio_sample_info.type = player_sample_info.type;
+  enhanced_audio_sample_info.buffer = player_sample_info.buffer;
+  enhanced_audio_sample_info.buffer_size = player_sample_info.buffer_size;
+  enhanced_audio_sample_info.timestamp = player_sample_info.timestamp;
+  enhanced_audio_sample_info.side_data = player_sample_info.side_data;
+  enhanced_audio_sample_info.side_data_count =
+      player_sample_info.side_data_count;
+  audio_sample_info.ConvertTo(&enhanced_audio_sample_info.audio_sample_info);
+  enhanced_audio_sample_info.drm_info = player_sample_info.drm_info;
+
+  auto input_buffer = new InputBuffer(StubDeallocateSampleFunc, nullptr,
+                                      nullptr, enhanced_audio_sample_info);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  return input_buffer;
 }
 
 }  // namespace testing

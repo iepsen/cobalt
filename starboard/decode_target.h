@@ -90,9 +90,9 @@
 #ifndef STARBOARD_DECODE_TARGET_H_
 #define STARBOARD_DECODE_TARGET_H_
 
-#include "starboard/common/log.h"
 #include "starboard/configuration.h"
 #include "starboard/export.h"
+#include "starboard/log.h"
 #include "starboard/types.h"
 
 #ifdef __cplusplus
@@ -330,7 +330,7 @@ static SB_C_INLINE int SbDecodeTargetNumberOfPlanesForFormat(
     case kSbDecodeTargetFormat3PlaneYUVI420:
       return 3;
     default:
-      SB_NOTREACHED();
+      SbLog(kSbLogPriorityFatal, "Unhandled SbDecodeTargetFormat");
       return 0;
   }
 }
@@ -342,8 +342,10 @@ static SB_C_INLINE int SbDecodeTargetNumberOfPlanesForFormat(
 // must be called on a thread with the context
 SB_EXPORT void SbDecodeTargetRelease(SbDecodeTarget decode_target);
 
-// Writes all information about |decode_target| into |out_info|.  Returns false
-// if the provided |out_info| structure is not zero initialized.
+// Writes all information about |decode_target| into |out_info|.
+// The |decode_target| must not be kSbDecodeTargetInvalid.
+// The |out_info| pointer must not be NULL.
+// Returns false if the provided |out_info| structure is not zero initialized.
 SB_EXPORT bool SbDecodeTargetGetInfo(SbDecodeTarget decode_target,
                                      SbDecodeTargetInfo* out_info);
 
@@ -356,7 +358,9 @@ static SB_C_INLINE void SbDecodeTargetRunInGlesContext(
     SbDecodeTargetGraphicsContextProvider* provider,
     SbDecodeTargetGlesContextRunnerTarget target,
     void* target_context) {
-  provider->gles_context_runner(provider, target, target_context);
+  if (provider) {
+    provider->gles_context_runner(provider, target, target_context);
+  }
 }
 
 // This function is just an implementation detail of

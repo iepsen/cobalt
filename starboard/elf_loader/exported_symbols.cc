@@ -42,6 +42,7 @@
 #if SB_API_VERSION < 13
 #include "starboard/speech_recognizer.h"
 #endif
+#include "starboard/common/log.h"
 #include "starboard/speech_synthesis.h"
 #include "starboard/storage.h"
 #include "starboard/string.h"
@@ -239,15 +240,27 @@ ExportedSymbols::ExportedSymbols() {
   REGISTER_SYMBOL(SbPlayerCreate);
   REGISTER_SYMBOL(SbPlayerDestroy);
   REGISTER_SYMBOL(SbPlayerGetCurrentFrame);
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  REGISTER_SYMBOL(SbPlayerGetInfo);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   REGISTER_SYMBOL(SbPlayerGetInfo2);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   REGISTER_SYMBOL(SbPlayerGetMaximumNumberOfSamplesPerWrite);
   REGISTER_SYMBOL(SbPlayerGetPreferredOutputMode);
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  REGISTER_SYMBOL(SbPlayerSeek);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   REGISTER_SYMBOL(SbPlayerSeek2);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   REGISTER_SYMBOL(SbPlayerSetBounds);
   REGISTER_SYMBOL(SbPlayerSetPlaybackRate);
   REGISTER_SYMBOL(SbPlayerSetVolume);
   REGISTER_SYMBOL(SbPlayerWriteEndOfStream);
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  REGISTER_SYMBOL(SbPlayerWriteSamples);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   REGISTER_SYMBOL(SbPlayerWriteSample2);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   REGISTER_SYMBOL(SbSocketAccept);
   REGISTER_SYMBOL(SbSocketBind);
   REGISTER_SYMBOL(SbSocketClearLastError);

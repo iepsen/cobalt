@@ -42,13 +42,14 @@
 #include "cobalt/worker/client_query_options.h"
 #include "cobalt/worker/frame_type.h"
 #include "cobalt/worker/service_worker.h"
+#include "cobalt/worker/service_worker_consts.h"
 #include "cobalt/worker/service_worker_object.h"
 #include "cobalt/worker/service_worker_registration.h"
 #include "cobalt/worker/service_worker_registration_map.h"
 #include "cobalt/worker/service_worker_registration_object.h"
 #include "cobalt/worker/service_worker_update_via_cache.h"
 #include "cobalt/worker/worker_type.h"
-#include "starboard/atomic.h"
+#include "starboard/common/atomic.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -129,6 +130,7 @@ class ServiceWorkerJobs {
     JobQueue* containing_job_queue = nullptr;
     std::deque<std::unique_ptr<Job>> equivalent_jobs;
     bool force_bypass_cache_flag = false;
+    bool no_promise_okay = false;
 
     // Custom, not in the spec.
     //
@@ -190,10 +192,8 @@ class ServiceWorkerJobs {
   ServiceWorkerJobs(web::WebSettings* web_settings,
                     network::NetworkModule* network_module,
                     web::UserAgentPlatformInfo* platform_info,
-                    base::MessageLoop* message_loop);
+                    base::MessageLoop* message_loop, const GURL& url);
   ~ServiceWorkerJobs();
-
-  void Stop();
 
   base::MessageLoop* message_loop() { return message_loop_; }
 
@@ -301,6 +301,15 @@ class ServiceWorkerJobs {
     return CreateJob(type, storage_key, scope_url, script_url,
                      JobPromiseType::Create(std::move(promise)), client);
   }
+  std::unique_ptr<Job> CreateJobWithoutPromise(JobType type,
+                                               const url::Origin& storage_key,
+                                               const GURL& scope_url,
+                                               const GURL& script_url) {
+    auto job = CreateJob(type, storage_key, scope_url, script_url,
+                         std::unique_ptr<JobPromiseType>(), /*client=*/nullptr);
+    job->no_promise_okay = true;
+    return job;
+  }
   std::unique_ptr<Job> CreateJob(
       JobType type, const url::Origin& storage_key, const GURL& scope_url,
       const GURL& script_url, std::unique_ptr<JobPromiseType> promise = nullptr,
@@ -315,12 +324,13 @@ class ServiceWorkerJobs {
   // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#clear-registration-algorithm
   void ClearRegistration(ServiceWorkerRegistrationObject* registration);
 
-  // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#update-state-algorithm
-  void UpdateWorkerState(ServiceWorkerObject* worker, ServiceWorkerState state);
-
   // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#soft-update
-  void SoftUpdate(scoped_refptr<ServiceWorkerRegistrationObject> registration,
-                  bool force_bypass_cache = false);
+  void SoftUpdate(ServiceWorkerRegistrationObject* registration,
+                  bool force_bypass_cache);
+
+  void EnsureServiceWorkerStarted(const url::Origin& storage_key,
+                                  const GURL& client_url,
+                                  base::WaitableEvent* done_event);
 
  private:
   // State used for the 'Update' algorithm.
@@ -400,7 +410,6 @@ class ServiceWorkerJobs {
                                 scoped_refptr<ServiceWorkerObject> worker,
                                 bool run_result);
 
-
   // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#unregister-algorithm
   void Unregister(Job* job);
 
@@ -443,6 +452,9 @@ class ServiceWorkerJobs {
       ServiceWorkerRegistrationObject* registration, RegistrationState target,
       const scoped_refptr<ServiceWorkerObject>& source);
 
+  // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#update-state-algorithm
+  void UpdateWorkerState(ServiceWorkerObject* worker, ServiceWorkerState state);
+
   // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#on-client-unload-algorithm
   void HandleServiceWorkerClientUnload(web::Context* client);
 
@@ -458,6 +470,10 @@ class ServiceWorkerJobs {
   bool IsAnyClientUsingRegistration(
       ServiceWorkerRegistrationObject* registration);
 
+  // Returns false when the timeout is reached.
+  bool WaitForAsynchronousExtensions(
+      const scoped_refptr<ServiceWorkerRegistrationObject>& registration);
+
   // FetcherFactory that is used to create a fetcher according to URL.
   std::unique_ptr<loader::FetcherFactory> fetcher_factory_;
   // LoaderFactory that is used to acquire references to resources from a URL.
@@ -472,10 +488,6 @@ class ServiceWorkerJobs {
   base::WaitableEvent web_context_registrations_cleared_ = {
       base::WaitableEvent::ResetPolicy::MANUAL,
       base::WaitableEvent::InitialState::NOT_SIGNALED};
-
-  base::WaitableEvent done_event_ = {
-      base::WaitableEvent::ResetPolicy::MANUAL,
-      base::WaitableEvent::InitialState::SIGNALED};
 };
 
 }  // namespace worker

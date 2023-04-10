@@ -310,8 +310,6 @@ static_library("starboard_platform_sources") {
     "//starboard/shared/starboard/media/media_is_audio_supported_aac_and_opus.cc",
     "//starboard/shared/starboard/media/media_is_buffer_pool_allocate_on_demand.cc",
     "//starboard/shared/starboard/media/media_is_buffer_using_memory_pool.cc",
-    "//starboard/shared/starboard/media/mime_type.cc",
-    "//starboard/shared/starboard/media/mime_type.h",
     "//starboard/shared/starboard/memory.cc",
     "//starboard/shared/starboard/new.cc",
     "//starboard/shared/starboard/queue_application.cc",
@@ -399,10 +397,6 @@ static_library("starboard_platform_sources") {
     "//starboard/shared/starboard/player/filter:filter_based_player_sources",
   ]
 
-  if (sb_is_evergreen_compatible && !sb_evergreen_compatible_enable_lite) {
-    public_deps += [ "//starboard/loader_app:pending_restart" ]
-  }
-
   deps = [
     "//third_party/libevent",
     "//third_party/opus",
@@ -413,7 +407,11 @@ static_library("starboard_platform_sources") {
   }
 
   if (sb_is_evergreen_compatible) {
-    public_deps += [ "//starboard/elf_loader:evergreen_config" ]
+    public_deps += [
+      "//starboard/elf_loader:constants",
+      "//starboard/elf_loader:evergreen_config",
+      "//starboard/loader_app:pending_restart",
+    ]
     deps += [ "//third_party/crashpad/wrapper" ]
   } else {
     deps += [ "//third_party/crashpad/wrapper:wrapper_stub" ]

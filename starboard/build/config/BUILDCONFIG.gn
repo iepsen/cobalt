@@ -22,6 +22,10 @@ declare_args() {
 
   is_starboard = true
 
+  # Used to guard any customizations to Chromium or third-party code for builds
+  # where the Starboard porting layer is not used.
+  is_native_target_build = false
+
   cobalt_fastbuild = getenv("IS_CI") == "1"
 
   is_internal_build = getenv("COBALT_USE_INTERNAL_BUILD") == "1"
@@ -30,6 +34,19 @@ declare_args() {
 
   using_old_compiler = false
 }
+
+assert(!(is_starboard && is_native_target_build),
+       "Targets should be built for Starboard or natively, but not both")
+
+# Used to guard customizations to Chromium or third-party code. We historically
+# used is_starboard for this, but we developed the need to distinguish between
+# a) customizations that should only be used for Starboard builds and b)
+# those that should only be used for native target builds (see
+# is_native_target_build). use_cobalt_customizations is a convenience in the
+# sense that it is functionally equivalent to
+# (is_starboard || is_native_target_build), but it should be used in lieu of
+# that since the intent is more clear.
+use_cobalt_customizations = true
 
 is_debug = build_type == "debug"
 is_devel = build_type == "devel"
@@ -68,7 +85,13 @@ if (is_mac) {
 # Get the path to the starboard implementation and include its GN
 # configuration.
 import("//starboard/build/platform_path.gni")
-host_toolchain = "//$starboard_path/toolchain:host"
+# TODO(b/272790873): Set host_cpu to x86 for 32 bit builds.
+if (target_cpu == "x86" || target_cpu == "arm") {
+  _host_toolchain_cpu = "x86"
+} else {
+  _host_toolchain_cpu = host_cpu
+}
+host_toolchain = "//starboard/build/toolchain/$host_os:$_host_toolchain_cpu"
 target_toolchain = "//$starboard_path/toolchain:target"
 set_default_toolchain(target_toolchain)
 
@@ -156,8 +179,12 @@ set_defaults("shared_library") {
 # We make sure to change the pedantic_warnings configs in a particular order to
 # ensure -Wno-foo compiler flags (usually set in no_pedantic_warnings and some
 # of the platform_configuration) come after -Wfoo flags (including -Wall and
-# -Wextra which are set in pedantic_warnings). It is only certain the the "foo"
+# -Wextra which are set in pedantic_warnings). It is only certain that the "foo"
 # error will be ignored if -Wfoo precedes -Wno-foo in the compilation line.
+declare_args() {
+  toolchain_config_path = "//$starboard_path/platform_configuration"
+}
+
 template("target_with_platform_configs") {
   target(invoker.target_type, target_name) {
     forward_variables_from(invoker, "*", [ "target_type" ])
@@ -165,7 +192,7 @@ template("target_with_platform_configs") {
     if (has_pedantic_warnings) {
       configs += [ "//starboard/build/config:pedantic_warnings" ]
     }
-    configs += [ "//$starboard_path/platform_configuration" ]
+    configs += [ toolchain_config_path ]
     if (!has_pedantic_warnings) {
       configs += [ "//starboard/build/config:no_pedantic_warnings" ]
     }

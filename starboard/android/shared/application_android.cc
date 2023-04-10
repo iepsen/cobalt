@@ -34,6 +34,7 @@
 #include "starboard/common/mutex.h"
 #include "starboard/common/string.h"
 #include "starboard/event.h"
+#include "starboard/key.h"
 #include "starboard/shared/starboard/audio_sink/audio_sink_internal.h"
 
 namespace starboard {
@@ -79,7 +80,13 @@ const char* AndroidCommandName(
 // "using" doesn't work with class members, so make a local convenience type.
 typedef ::starboard::shared::starboard::Application::Event Event;
 
+#if SB_MODULAR_BUILD
+ApplicationAndroid::ApplicationAndroid(
+    ALooper* looper,
+    SbEventHandleCallback sb_event_handle_callback)
+#else
 ApplicationAndroid::ApplicationAndroid(ALooper* looper)
+#endif  // SB_MODULAR_BUILD
     : looper_(looper),
       native_window_(NULL),
       android_command_readfd_(-1),
@@ -89,6 +96,9 @@ ApplicationAndroid::ApplicationAndroid(ALooper* looper)
       android_command_condition_(android_command_mutex_),
       activity_state_(AndroidCommand::kUndefined),
       window_(kSbWindowInvalid),
+#if SB_MODULAR_BUILD
+      QueueApplication(sb_event_handle_callback),
+#endif  // SB_MODULAR_BUILD
       last_is_accessibility_high_contrast_text_enabled_(false) {
   // Initialize Time Zone early so that local time works correctly.
   // Called once here to help SbTimeZoneGet*Name()
@@ -734,6 +744,20 @@ bool ApplicationAndroid::GetOverlayedBoolValue(const char* var_name) {
       env->GetBooleanFieldOrAbort(resource_overlay_, var_name, "Z");
   overlayed_bool_variables_[var_name] = value;
   return value;
+}
+
+extern "C" SB_EXPORT_PLATFORM void
+Java_dev_cobalt_coat_VolumeStateReceiver_nativeVolumeChanged(JNIEnv* env,
+                                                             jobject jcaller,
+                                                             jint volumeDelta) {
+  SbKey key = volumeDelta > 0 ? SbKey::kSbKeyVolumeUp : SbKey::kSbKeyVolumeDown;
+  ApplicationAndroid::Get()->SendKeyboardInject(key);
+}
+
+extern "C" SB_EXPORT_PLATFORM void
+Java_dev_cobalt_coat_VolumeStateReceiver_nativeMuteChanged(JNIEnv* env,
+                                                           jobject jcaller) {
+  ApplicationAndroid::Get()->SendKeyboardInject(SbKey::kSbKeyVolumeMute);
 }
 
 }  // namespace shared

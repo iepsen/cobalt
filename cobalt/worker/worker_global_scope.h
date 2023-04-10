@@ -35,6 +35,7 @@
 #include "cobalt/web/user_agent_platform_info.h"
 #include "cobalt/web/window_or_worker_global_scope.h"
 #include "cobalt/web/window_timers.h"
+#include "cobalt/worker/service_worker_consts.h"
 #include "cobalt/worker/worker_location.h"
 #include "cobalt/worker/worker_navigator.h"
 #include "net/http/http_response_headers.h"
@@ -55,6 +56,7 @@ struct ScriptResource {
       : content(std::move(content)), headers(headers) {}
   std::unique_ptr<std::string> content;
   scoped_refptr<net::HttpResponseHeaders> headers;
+  bool has_ever_been_evaluated = false;
 };
 
 using ScriptResourceMap = std::map<GURL, ScriptResource>;
@@ -70,7 +72,9 @@ class WorkerGlobalScope : public web::WindowOrWorkerGlobalScope {
   using ResponseCallback =
       base::Callback<std::string*(const GURL& url, std::string*)>;
 
-  explicit WorkerGlobalScope(script::EnvironmentSettings* settings);
+  explicit WorkerGlobalScope(
+      script::EnvironmentSettings* settings,
+      const web::WindowOrWorkerGlobalScope::Options& options);
   WorkerGlobalScope(const WorkerGlobalScope&) = delete;
   WorkerGlobalScope& operator=(const WorkerGlobalScope&) = delete;
 

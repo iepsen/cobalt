@@ -21,8 +21,10 @@ namespace wrapper {
 const char kCrashpadVersionKey[]  = "";
 const char kCrashpadProductKey[]  = "";
 const char kCrashpadUserAgentStringKey[]  = "";
+const char kCrashpadCertScopeKey[] = "";
 
-void InstallCrashpadHandler(bool start_at_crash) {}
+void InstallCrashpadHandler(bool start_at_crash,
+                            const std::string& ca_certificates_path) {}
 
 bool AddEvergreenInfoToCrashpad(EvergreenInfo evergreen_info) {
   return false;

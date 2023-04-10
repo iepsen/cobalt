@@ -45,7 +45,8 @@ repos:
             (?x)^(
                 starboard/[^/]+/i18n/|
                 cobalt/content/licenses/|
-                cobalt/fetch/embedded_scripts
+                cobalt/fetch/embedded_scripts|
+                cobalt/loader/cors_preflight.cc
             )
 
 -   repo: local
@@ -107,9 +108,14 @@ repos:
         stages: [push]
         exclude: |
             (?x)^(
+                .pre-commit-config.yaml$|
                 cobalt/media/|
                 cobalt/layout_tests/testdata/|
-                starboard/android/apk/app/src/main/java/dev/cobalt/media/MediaDrmBridge.java$
+                nb/|
+                starboard/android/apk/app/src/main/java/dev/cobalt/media/MediaDrmBridge.java$|
+                starboard/shared/starboard/player/filter/decoded_audio_queue.cc$|
+                starboard/shared/starboard/player/filter/decoded_audio_queue.h$|
+                starboard/shared/starboard/player/filter/wsola_internal.cc$
             )
         exclude_types: [markdown]
         verbose: true

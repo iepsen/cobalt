@@ -169,7 +169,7 @@ void Usage(const base::FilePath& me) {
 "      --trace-parent-with-exception=EXCEPTION_INFORMATION_ADDRESS\n"
 "                              request a dump for the handler's parent process\n"
 #endif  // OS_LINUX || OS_ANDROID
-#if defined(STARBOARD)
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
 "      --evergreen-information=EVERGREEN_INFORMATION_ADDRESS\n"
 "                              the address of a EvegreenInfo struct.\n"
 "      --handler-started-at-crash\n"
@@ -215,10 +215,11 @@ struct Options {
   VMAddress sanitization_information_address;
   int initial_client_fd;
   bool shared_client_connection;
-#if defined(STARBOARD)
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
   VMAddress evergreen_information_address;
   bool handler_started_at_crash = false;
-#endif  // defined(STARBOARD)
+  std::string ca_certificates_path;
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
 #if defined(OS_ANDROID)
   bool write_minidump_to_log;
   bool write_minidump_to_database;
@@ -503,6 +504,9 @@ void MonitorSelf(const Options& options) {
                                     options.database,
                                     base::FilePath(),
                                     options.url,
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+                                    options.ca_certificates_path,
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
                                     options.annotations,
                                     extra_arguments,
                                     true,
@@ -592,10 +596,11 @@ int HandlerMain(int argc,
     kOptionSanitizationInformation,
     kOptionSharedClientConnection,
     kOptionTraceParentWithException,
-#if defined(STARBOARD)
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
     kOptionEvergreenInformaton,
     kOptionHandlerStartedAtCrash,
-#endif  // defined(STARBOARD)
+    kOptionCACertificatesPath,
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
 #endif
     kOptionURL,
 #if defined(OS_CHROMEOS)
@@ -676,7 +681,7 @@ int HandlerMain(int argc,
      nullptr,
      kOptionTraceParentWithException},
 #endif  // OS_LINUX || OS_ANDROID
-#if defined(STARBOARD)
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
     {"evergreen-information",
      required_argument,
      nullptr,
@@ -685,6 +690,10 @@ int HandlerMain(int argc,
      no_argument,
      nullptr,
      kOptionHandlerStartedAtCrash},
+    {"ca-certificates-path",
+     required_argument,
+     nullptr,
+     kOptionCACertificatesPath},
 #endif
     {"url", required_argument, nullptr, kOptionURL},
 #if defined(OS_CHROMEOS)
@@ -849,7 +858,7 @@ int HandlerMain(int argc,
         }
         break;
       }
-#if defined(STARBOARD)
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
       case kOptionEvergreenInformaton: {
         if (!StringToNumber(optarg,
                             &options.evergreen_information_address)) {
@@ -863,7 +872,11 @@ int HandlerMain(int argc,
         options.handler_started_at_crash = true;
         break;
       }
-#endif   // defined(STARBOARD)
+      case kOptionCACertificatesPath: {
+        options.ca_certificates_path = optarg;
+        break;
+      }
+#endif   // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
 #endif  // OS_LINUX || OS_ANDROID
       case kOptionURL: {
         options.url = optarg;
@@ -1019,7 +1032,12 @@ int HandlerMain(int argc,
     upload_thread_options.watch_pending_reports = options.periodic_tasks;
 
     upload_thread.Reset(new CrashReportUploadThread(
-        database.get(), options.url, upload_thread_options));
+        database.get(),
+        options.url,
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+        options.ca_certificates_path,
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+        upload_thread_options));
     upload_thread.Get()->Start();
   }
 
@@ -1080,13 +1098,13 @@ int HandlerMain(int argc,
     info.exception_information_address = options.exception_information_address;
     info.sanitization_information_address =
         options.sanitization_information_address;
-#if defined(STARBOARD)
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
     info.evergreen_information_address =
         options.evergreen_information_address;
     if (options.handler_started_at_crash) {
       info.handler_start_type = ExceptionHandlerProtocol::kStartAtCrash;
     }
-#endif   // defined(STARBOARD)
+#endif   // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
     return exception_handler->HandleException(getppid(), geteuid(), info)
                ? EXIT_SUCCESS
                : ExitFailure();

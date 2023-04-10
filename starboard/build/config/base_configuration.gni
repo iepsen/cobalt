@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("//build/config/clang/clang.gni")
 import("//cobalt/content/fonts/font_configuration.gni")
+import("//starboard/build/config/clang.gni")
 import("//starboard/build/config/enable_vr.gni")
 
 # NOTE:
@@ -21,11 +21,11 @@ import("//starboard/build/config/enable_vr.gni")
 # Please follow the formatting in this file when adding new ones.
 
 declare_args() {
-  # Enables the yasm compiler to be used to compile .asm files.
-  yasm_exists = false
+  # Enables the nasm compiler to be used to compile .asm files.
+  nasm_exists = false
 
   # Where yasm can be found on the host device.
-  path_to_yasm = "yasm"
+  path_to_nasm = "nasm"
 
   # The Starboard API version of the current build configuration. The default
   # value is meant to be overridden by a Starboard ABI file.
@@ -47,9 +47,6 @@ declare_args() {
 
   # Whether to use the libunwind library on Evergreen compatible platform.
   sb_evergreen_compatible_use_libunwind = false
-
-  # Whether to adopt Evergreen Lite on the Evergreen compatible platform.
-  sb_evergreen_compatible_enable_lite = false
 
   # Whether to generate the whole package containing both Loader app and Cobalt
   # core on the Evergreen compatible platform.

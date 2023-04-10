@@ -45,11 +45,18 @@
 
 namespace crashpad {
 
-CrashReportUploadThread::CrashReportUploadThread(CrashReportDatabase* database,
-                                                 const std::string& url,
-                                                 const Options& options)
+CrashReportUploadThread::CrashReportUploadThread(
+    CrashReportDatabase* database,
+    const std::string& url,
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+    const std::string& ca_certificates_path,
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+    const Options& options)
     : options_(options),
       url_(url),
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+      ca_certificates_path_(ca_certificates_path),
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
       // When watching for pending reports, check every 15 minutes, even in the
       // absence of a signal from the handler thread. This allows for failed
       // uploads to be retried periodically, and for pending reports written by
@@ -241,7 +248,7 @@ void CrashReportUploadThread::ProcessPendingReport(
                                   Metrics::CrashSkippedReason::kUploadFailed);
       break;
   }
-#if defined(STARBOARD)
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
   database_->RemoveOldReports(/*num_reports_to_save=*/2);
 #endif
 }
@@ -329,6 +336,9 @@ CrashReportUploadThread::UploadResult CrashReportUploadThread::UploadReport(
     }
   }
   http_transport->SetURL(url);
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+  http_transport->SetRootCACertificatesDirectoryPath(ca_certificates_path_);
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
 
   if (!http_transport->ExecuteSynchronously(response_body)) {
     return UploadResult::kRetry;

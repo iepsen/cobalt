@@ -35,7 +35,7 @@ class IdentityAudioResampler : public AudioResampler {
  public:
   IdentityAudioResampler() : eos_reached_(false) {}
   scoped_refptr<DecodedAudio> Resample(
-      const scoped_refptr<DecodedAudio>& audio_data) override {
+      scoped_refptr<DecodedAudio> audio_data) override {
     SB_DCHECK(!eos_reached_);
 
     return audio_data;
@@ -68,12 +68,12 @@ SbMediaAudioSampleType GetSinkAudioSampleType(
 AudioRendererPcm::AudioRendererPcm(
     scoped_ptr<AudioDecoder> decoder,
     scoped_ptr<AudioRendererSink> audio_renderer_sink,
-    const SbMediaAudioSampleInfo& audio_sample_info,
+    const media::AudioStreamInfo& audio_stream_info,
     int max_cached_frames,
     int min_frames_per_append)
     : max_cached_frames_(max_cached_frames),
       min_frames_per_append_(min_frames_per_append),
-      channels_(audio_sample_info.number_of_channels),
+      channels_(audio_stream_info.number_of_channels),
       sink_sample_type_(GetSinkAudioSampleType(audio_renderer_sink.get())),
       bytes_per_frame_(media::GetBytesPerSample(sink_sample_type_) * channels_),
       frame_buffer_(max_cached_frames_ * bytes_per_frame_),
@@ -637,11 +637,16 @@ void AudioRendererPcm::ProcessAudioData() {
       resampled_audio = resampler_->Resample(decoded_audio);
     }
 
-    if (resampled_audio && resampled_audio->size() > 0) {
+    if (resampled_audio && resampled_audio->size_in_bytes() > 0) {
       // |time_stretcher_| only support kSbMediaAudioSampleTypeFloat32 and
       // kSbMediaAudioFrameStorageTypeInterleaved.
-      resampled_audio->SwitchFormatTo(kSbMediaAudioSampleTypeFloat32,
-                                      kSbMediaAudioFrameStorageTypeInterleaved);
+      if (!resampled_audio->IsFormat(
+              kSbMediaAudioSampleTypeFloat32,
+              kSbMediaAudioFrameStorageTypeInterleaved)) {
+        resampled_audio = resampled_audio->SwitchFormatTo(
+            kSbMediaAudioSampleTypeFloat32,
+            kSbMediaAudioFrameStorageTypeInterleaved);
+      }
       time_stretcher_.EnqueueBuffer(resampled_audio);
     }
 
@@ -713,9 +718,12 @@ bool AudioRendererPcm::AppendAudioToFrameBuffer(bool* is_frame_buffer_full) {
 
   // |time_stretcher_| only support kSbMediaAudioSampleTypeFloat32 and
   // kSbMediaAudioFrameStorageTypeInterleaved.
-  decoded_audio->SwitchFormatTo(sink_sample_type_,
-                                kSbMediaAudioFrameStorageTypeInterleaved);
-  const uint8_t* source_buffer = decoded_audio->buffer();
+  if (!decoded_audio->IsFormat(sink_sample_type_,
+                               kSbMediaAudioFrameStorageTypeInterleaved)) {
+    decoded_audio = decoded_audio->SwitchFormatTo(
+        sink_sample_type_, kSbMediaAudioFrameStorageTypeInterleaved);
+  }
+  const uint8_t* source_buffer = decoded_audio->data();
   int frames_to_append = decoded_audio->frames();
   int frames_appended = 0;
 

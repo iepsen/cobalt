@@ -36,6 +36,7 @@ namespace wrapper {
 const char kCrashpadVersionKey[]  = "ver";
 const char kCrashpadProductKey[]  = "prod";
 const char kCrashpadUserAgentStringKey[]  = "user_agent_string";
+const char kCrashpadCertScopeKey[] = "cert_scope";
 
 namespace {
 // TODO: Get evergreen information from installation.
@@ -61,7 +62,12 @@ base::FilePath GetPathToCrashpadHandlerBinary() {
   base::FilePath exe_dir_path = base::FilePath(exe_path.data()).DirName();
   std::string handler_path(exe_dir_path.value());
   handler_path.push_back(kSbFileSepChar);
+#if defined(OS_ANDROID)
+  // Path to the extracted native library.
+  handler_path.append("arm/libcrashpad_handler.so");
+#else
   handler_path.append("crashpad_handler");
+#endif  // defined(OS_ANDROID)
   return base::FilePath(handler_path.c_str());
 }
 
@@ -164,12 +170,20 @@ std::map<std::string, std::string> GetPlatformInfo() {
     platform_info.insert({"model", value.data()});
   }
 
+  result = SbSystemGetProperty(kSbSystemPropertyCertificationScope,
+                               value.data(),
+                               kSystemPropertyMaxLength);
+  if (result) {
+    platform_info.insert({kCrashpadCertScopeKey, value.data()});
+  }
+
   return platform_info;
 }
 
 }  // namespace
 
-void InstallCrashpadHandler(bool start_at_crash) {
+void InstallCrashpadHandler(bool start_at_crash,
+                            const std::string& ca_certificates_path) {
   ::crashpad::CrashpadClient* client = GetCrashpadClient();
 
   const base::FilePath handler_path = GetPathToCrashpadHandlerBinary();
@@ -183,7 +197,9 @@ void InstallCrashpadHandler(bool start_at_crash) {
   const base::FilePath default_metrics_dir;
   const std::string product_name = GetProductName();
   std::map<std::string, std::string> default_annotations = {
-      {"ver", kCrashpadVersion}, {"prod", product_name}};
+      {kCrashpadVersionKey, kCrashpadVersion},
+      {kCrashpadProductKey, product_name}
+  };
   const std::vector<std::string> default_arguments = {};
 
   const std::map<std::string, std::string> platform_info = GetPlatformInfo();
@@ -197,6 +213,7 @@ void InstallCrashpadHandler(bool start_at_crash) {
                                 database_directory_path,
                                 default_metrics_dir,
                                 kUploadUrl,
+                                ca_certificates_path,
                                 default_annotations,
                                 default_arguments);
   else
@@ -204,6 +221,7 @@ void InstallCrashpadHandler(bool start_at_crash) {
                          database_directory_path,
                          default_metrics_dir,
                          kUploadUrl,
+                         ca_certificates_path,
                          default_annotations,
                          default_arguments,
                          false,

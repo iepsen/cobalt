@@ -14,6 +14,8 @@
 
 #include "starboard/shared/opus/opus_audio_decoder.h"
 
+#include <algorithm>
+
 #include "starboard/common/log.h"
 #include "starboard/common/string.h"
 
@@ -43,18 +45,17 @@ static const VorbisLayout vorbis_mappings[8] = {
 
 }  // namespace
 
-OpusAudioDecoder::OpusAudioDecoder(
-    const SbMediaAudioSampleInfo& audio_sample_info)
-    : audio_sample_info_(audio_sample_info) {
+OpusAudioDecoder::OpusAudioDecoder(const AudioStreamInfo& audio_stream_info)
+    : audio_stream_info_(audio_stream_info) {
   int error;
-  int channels = audio_sample_info_.number_of_channels;
+  int channels = audio_stream_info_.number_of_channels;
   if (channels > 8 || channels < 1) {
     SB_LOG(ERROR) << "Can't create decoder with " << channels << " channels";
     return;
   }
 
   decoder_ = opus_multistream_decoder_create(
-      audio_sample_info_.samples_per_second, channels,
+      audio_stream_info_.samples_per_second, channels,
       vorbis_mappings[channels - 1].nb_streams,
       vorbis_mappings[channels - 1].nb_coupled_streams,
       vorbis_mappings[channels - 1].mapping, &error);
@@ -89,19 +90,51 @@ void OpusAudioDecoder::Decode(const InputBuffers& input_buffers,
                               const ConsumedCB& consumed_cb) {
   SB_DCHECK(BelongsToCurrentThread());
   SB_DCHECK(!input_buffers.empty());
+  SB_DCHECK(pending_audio_buffers_.empty());
   SB_DCHECK(output_cb_);
 
   if (stream_ended_) {
     SB_LOG(ERROR) << "Decode() is called after WriteEndOfStream() is called.";
     return;
   }
+  if (input_buffers.size() > kMinimumBuffersToDecode) {
+    std::copy(std::begin(input_buffers), std::end(input_buffers),
+              std::back_inserter(pending_audio_buffers_));
+    consumed_cb_ = consumed_cb;
+    DecodePendingBuffers();
+  } else {
+    for (const auto& input_buffer : input_buffers) {
+      if (!DecodeInternal(input_buffer)) {
+        return;
+      }
+    }
+    Schedule(consumed_cb);
+  }
+}
 
-  for (const auto& input_buffer : input_buffers) {
-    if (!DecodeInternal(input_buffer)) {
+void OpusAudioDecoder::DecodePendingBuffers() {
+  SB_DCHECK(BelongsToCurrentThread());
+  SB_DCHECK(!pending_audio_buffers_.empty());
+  SB_DCHECK(consumed_cb_);
+
+  for (int i = 0; i < kMinimumBuffersToDecode; ++i) {
+    if (!DecodeInternal(pending_audio_buffers_.front())) {
+      return;
+    }
+    pending_audio_buffers_.pop_front();
+    if (pending_audio_buffers_.empty()) {
+      Schedule(consumed_cb_);
+      consumed_cb_ = nullptr;
+      if (stream_ended_) {
+        Schedule(std::bind(&OpusAudioDecoder::WriteEndOfStream, this));
+        stream_ended_ = false;
+      }
       return;
     }
   }
-  Schedule(consumed_cb);
+
+  SB_DCHECK(!pending_audio_buffers_.empty());
+  Schedule(std::bind(&OpusAudioDecoder::DecodePendingBuffers, this));
 }
 
 bool OpusAudioDecoder::DecodeInternal(
@@ -109,12 +142,12 @@ bool OpusAudioDecoder::DecodeInternal(
   SB_DCHECK(BelongsToCurrentThread());
   SB_DCHECK(input_buffer);
   SB_DCHECK(output_cb_);
-  SB_DCHECK(!stream_ended_);
+  SB_DCHECK(!stream_ended_ || !pending_audio_buffers_.empty());
 
   scoped_refptr<DecodedAudio> decoded_audio = new DecodedAudio(
-      audio_sample_info_.number_of_channels, GetSampleType(),
+      audio_stream_info_.number_of_channels, GetSampleType(),
       kSbMediaAudioFrameStorageTypeInterleaved, input_buffer->timestamp(),
-      audio_sample_info_.number_of_channels * frames_per_au_ *
+      audio_stream_info_.number_of_channels * frames_per_au_ *
           starboard::media::GetBytesPerSample(GetSampleType()));
 
 #if SB_HAS_QUIRK(SUPPORT_INT16_AUDIO_SAMPLES)
@@ -122,13 +155,12 @@ bool OpusAudioDecoder::DecodeInternal(
   int decoded_frames = opus_multistream_decode(
       decoder_, static_cast<const unsigned char*>(input_buffer->data()),
       input_buffer->size(),
-      reinterpret_cast<opus_int16*>(decoded_audio->buffer()), frames_per_au_,
-      0);
+      reinterpret_cast<opus_int16*>(decoded_audio->data()), frames_per_au_, 0);
 #else   // SB_HAS_QUIRK(SUPPORT_INT16_AUDIO_SAMPLES)
   const char kDecodeFunctionName[] = "opus_multistream_decode_float";
   int decoded_frames = opus_multistream_decode_float(
       decoder_, static_cast<const unsigned char*>(input_buffer->data()),
-      input_buffer->size(), reinterpret_cast<float*>(decoded_audio->buffer()),
+      input_buffer->size(), reinterpret_cast<float*>(decoded_audio->data()),
       frames_per_au_, 0);
 #endif  // SB_HAS_QUIRK(SUPPORT_INT16_AUDIO_SAMPLES)
   if (decoded_frames == OPUS_BUFFER_TOO_SMALL &&
@@ -153,10 +185,14 @@ bool OpusAudioDecoder::DecodeInternal(
   }
 
   frames_per_au_ = decoded_frames;
-  decoded_audio->ShrinkTo(audio_sample_info_.number_of_channels *
+  decoded_audio->ShrinkTo(audio_stream_info_.number_of_channels *
                           frames_per_au_ *
                           starboard::media::GetBytesPerSample(GetSampleType()));
-
+  const auto& sample_info = input_buffer->audio_sample_info();
+  decoded_audio->AdjustForDiscardedDurations(
+      audio_stream_info_.samples_per_second,
+      sample_info.discarded_duration_from_front,
+      sample_info.discarded_duration_from_back);
   decoded_audios_.push(decoded_audio);
   output_cb_();
   return true;
@@ -169,6 +205,10 @@ void OpusAudioDecoder::WriteEndOfStream() {
   // Opus has no dependent frames so we needn't flush the decoder.  Set the
   // flag to ensure that Decode() is not called when the stream is ended.
   stream_ended_ = true;
+  if (!pending_audio_buffers_.empty()) {
+    return;
+  }
+
   // Put EOS into the queue.
   decoded_audios_.push(new DecodedAudio);
 
@@ -186,7 +226,7 @@ scoped_refptr<OpusAudioDecoder::DecodedAudio> OpusAudioDecoder::Read(
     result = decoded_audios_.front();
     decoded_audios_.pop();
   }
-  *samples_per_second = audio_sample_info_.samples_per_second;
+  *samples_per_second = audio_stream_info_.samples_per_second;
   return result;
 }
 
@@ -197,6 +237,8 @@ void OpusAudioDecoder::Reset() {
   while (!decoded_audios_.empty()) {
     decoded_audios_.pop();
   }
+  pending_audio_buffers_.clear();
+  consumed_cb_ = nullptr;
 
   CancelPendingJobs();
 }

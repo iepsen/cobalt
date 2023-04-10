@@ -34,9 +34,12 @@
 
 namespace cobalt {
 namespace worker {
+
 ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(
-    script::EnvironmentSettings* settings, ServiceWorkerObject* service_worker)
-    : WorkerGlobalScope(settings),
+    script::EnvironmentSettings* settings,
+    const web::WindowOrWorkerGlobalScope::Options& options,
+    ServiceWorkerObject* service_worker)
+    : WorkerGlobalScope(settings, options),
       clients_(new Clients(settings)),
       service_worker_object_(base::AsWeakPtr(service_worker)) {
   loader::FetchInterceptorCoordinator::GetInstance()->Add(this);
@@ -119,6 +122,7 @@ void ServiceWorkerGlobalScope::ImportScripts(
             //     last update check time to the current time.
             // 11. If response’s unsafe response is a bad import script
             //     response, then return a network error.
+            // This is checked in WorkerGlobalScope.
 
             // 12. Set map[url] to response.
             service_worker->SetScriptResource(url, content);
@@ -190,25 +194,47 @@ script::HandlePromiseVoid ServiceWorkerGlobalScope::SkipWaiting() {
 }
 
 void ServiceWorkerGlobalScope::StartFetch(
-    const GURL& url,
+    const GURL& url, bool main_resource,
+    const net::HttpRequestHeaders& request_headers,
+    scoped_refptr<base::SingleThreadTaskRunner> callback_task_runner,
     base::OnceCallback<void(std::unique_ptr<std::string>)> callback,
     base::OnceCallback<void(const net::LoadTimingInfo&)>
         report_load_timing_info,
     base::OnceClosure fallback) {
+  // Only HTTP or HTTPS fetches should be intercepted.
+  // https://fetch.spec.whatwg.org/commit-snapshots/8f8ab504da6ca9681db5c7f8aa3d1f4b6bf8840c/#http-fetch
+  if (!url.SchemeIsHTTPOrHTTPS()) {
+    std::move(fallback).Run();
+    return;
+  }
   if (base::MessageLoop::current() !=
       environment_settings()->context()->message_loop()) {
     environment_settings()->context()->message_loop()->task_runner()->PostTask(
         FROM_HERE,
         base::BindOnce(&ServiceWorkerGlobalScope::StartFetch,
-                       base::Unretained(this), url, std::move(callback),
-                       std::move(report_load_timing_info),
+                       base::Unretained(this), url, main_resource,
+                       request_headers, callback_task_runner,
+                       std::move(callback), std::move(report_load_timing_info),
                        std::move(fallback)));
     return;
   }
   if (!service_worker()) {
-    std::move(fallback).Run();
+    callback_task_runner->PostTask(FROM_HERE, std::move(fallback));
     return;
   }
+
+  auto* registration =
+      service_worker_object_->containing_service_worker_registration();
+  if (registration && (main_resource || registration->stale())) {
+    worker::ServiceWorkerJobs* jobs =
+        environment_settings()->context()->service_worker_jobs();
+    jobs->message_loop()->task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ServiceWorkerJobs::SoftUpdate, base::Unretained(jobs),
+                       base::Unretained(registration),
+                       /*force_bypass_cache=*/false));
+  }
+
   // TODO: handle the following steps in
   //       https://www.w3.org/TR/2022/CRD-service-workers-20220712/#handle-fetch.
   // 22. If activeWorker’s state is "activating", wait for activeWorker’s state
@@ -219,9 +245,22 @@ void ServiceWorkerGlobalScope::StartFetch(
   auto* global_environment = get_global_environment(environment_settings());
   auto* isolate = global_environment->isolate();
   script::v8c::EntryScope entry_scope(isolate);
-  auto request = web::cache_utils::CreateRequest(isolate, url.spec());
+  base::DictionaryValue options;
+  if (main_resource) {
+    options.SetKey("mode", base::Value("navigate"));
+  }
+  base::ListValue headers;
+  for (auto header_pair : request_headers.GetHeaderVector()) {
+    base::ListValue header;
+    header.GetList().emplace_back(header_pair.key);
+    header.GetList().emplace_back(header_pair.value);
+    headers.GetList().push_back(std::move(header));
+  }
+  options.SetKey("headers", std::move(headers));
+  auto request =
+      web::cache_utils::CreateRequest(isolate, url.spec(), std::move(options));
   if (!request) {
-    std::move(fallback).Run();
+    callback_task_runner->PostTask(FROM_HERE, std::move(fallback));
     return;
   }
 
@@ -230,12 +269,13 @@ void ServiceWorkerGlobalScope::StartFetch(
       web::cache_utils::FromV8Value(isolate, request.value()).GetScriptValue());
   scoped_refptr<FetchEvent> fetch_event =
       new FetchEvent(environment_settings(), base::Tokens::fetch(), event_init,
-                     std::move(callback), std::move(report_load_timing_info));
+                     callback_task_runner, std::move(callback),
+                     std::move(report_load_timing_info));
   // 24. Create and dispatch event.
   DispatchEvent(fetch_event);
   // TODO: implement steps 25 and 26.
   if (!fetch_event->respond_with_called()) {
-    std::move(fallback).Run();
+    callback_task_runner->PostTask(FROM_HERE, std::move(fallback));
   }
 }
 

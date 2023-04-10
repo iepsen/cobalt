@@ -39,10 +39,6 @@
 namespace cobalt {
 namespace worker {
 
-namespace {
-bool PermitAnyURL(const GURL&, bool) { return true; }
-}  // namespace
-
 Worker::Worker(const char* name, const Options& options) : options_(options) {
   // Algorithm for 'run a worker'
   //   https://html.spec.whatwg.org/commit-snapshots/465a6b672c703054de278b0f8133eb3ad33d93f4/#run-a-worker
@@ -99,7 +95,7 @@ void Worker::Initialize(web::Context* context) {
   //   https://html.spec.whatwg.org/commit-snapshots/465a6b672c703054de278b0f8133eb3ad33d93f4/#set-up-a-worker-environment-settings-object
   worker_settings->set_origin(
       options_.outside_context->environment_settings()->GetOrigin());
-  web_context_->setup_environment_settings(worker_settings);
+  web_context_->SetupEnvironmentSettings(worker_settings);
   // From algorithm for to setup up a worker environment settings object:
   //   https://html.spec.whatwg.org/commit-snapshots/465a6b672c703054de278b0f8133eb3ad33d93f4/#set-up-a-worker-environment-settings-object
   // 5. Set settings object's creation URL to worker global scope's url.
@@ -108,8 +104,9 @@ void Worker::Initialize(web::Context* context) {
   // 8. Let worker global scope be the global object of realm execution
   //    context's Realm component.
   scoped_refptr<DedicatedWorkerGlobalScope> dedicated_worker_global_scope =
-      new DedicatedWorkerGlobalScope(web_context_->environment_settings(),
-                                     false);
+      new DedicatedWorkerGlobalScope(
+          web_context_->environment_settings(), options_.global_scope_options,
+          /*parent_cross_origin_isolated_capability*/ false);
   worker_global_scope_ = dedicated_worker_global_scope;
   // 9. Set up a worker environment settings object with realm execution
   //    context, outside settings, and unsafeWorkerCreationTime, and let
@@ -134,6 +131,7 @@ void Worker::Initialize(web::Context* context) {
 
   // 10. Set worker global scope's name to the value of options's name member.
   dedicated_worker_global_scope->set_name(options_.options.name());
+  web_context_->SetupFinished();
   // (Moved) 2. Let owner be the relevant owner to add given outside settings.
   web::WindowOrWorkerGlobalScope* owner =
       options_.outside_context->GetWindowOrWorkerGlobalScope();
@@ -229,7 +227,8 @@ void Worker::OnLoadingComplete(const base::Optional<std::string>& error) {
               error.set_filename(location.file_path);
               error.set_lineno(location.line_number);
               error.set_colno(location.column_number);
-              global_scope->DispatchEvent(new web::ErrorEvent(error));
+              global_scope->DispatchEvent(new web::ErrorEvent(
+                  global_scope->environment_settings(), error));
             },
             base::Unretained(
                 options_.outside_context->GetWindowOrWorkerGlobalScope()),
@@ -295,7 +294,7 @@ void Worker::Execute(const std::string& content,
               error.set_message(message);
               error.set_filename(filename);
               context->GetWindowOrWorkerGlobalScope()->DispatchEvent(
-                  new web::ErrorEvent(error));
+                  new web::ErrorEvent(context->environment_settings(), error));
             },
             options_.outside_context, retval,
             web_context_->environment_settings()->creation_url().spec()));
@@ -337,11 +336,13 @@ void Worker::Abort() {
     worker_global_scope_->owner_set()->clear();
   }
   if (web_agent_) {
-    DCHECK(message_loop());
-    web_agent_->WaitUntilDone();
-    web_agent_->Stop();
-    web_agent_.reset();
+    std::unique_ptr<web::Agent> web_agent(std::move(web_agent_));
+    DCHECK(web_agent);
+    DCHECK(!web_agent_);
+    web_agent->WaitUntilDone();
     web_context_ = nullptr;
+    web_agent->Stop();
+    web_agent.reset();
   }
 }
 

@@ -15,7 +15,7 @@
 import("//build/config/compiler/compiler.gni")
 
 config("base") {
-  defines = []
+  defines = [ "USE_COBALT_CUSTOMIZATIONS" ]
 
   if (is_debug) {
     defines += [
@@ -104,6 +104,8 @@ config("target") {
 
     if (is_starboard) {
       configs = [ ":starboard" ]
+    } else if (is_native_target_build) {
+      configs = [ ":native_target_build" ]
     }
   }
 }
@@ -156,15 +158,15 @@ config("starboard") {
       defines += [ "SB_IS_EVERGREEN_COMPATIBLE_LIBUNWIND=1" ]
     }
 
-    if (sb_evergreen_compatible_enable_lite) {
-      defines += [ "SB_IS_EVERGREEN_COMPATIBLE_LITE=1" ]
-    }
-
     defines += [
       "STARBOARD_ATOMIC_INCLUDE=\"$starboard_path/atomic_public.h\"",
       "STARBOARD_CONFIGURATION_INCLUDE=\"$starboard_path/configuration_public.h\"",
     ]
   }
+}
+
+config("native_target_build") {
+  defines = [ "NATIVE_TARGET_BUILD" ]
 }
 
 config("starboard_implementation") {
@@ -197,7 +199,8 @@ config("pedantic_warnings") {
 }
 
 config("no_pedantic_warnings") {
-  if (current_toolchain == default_toolchain) {
+  if (current_toolchain == default_toolchain ||
+      current_toolchain == "//$starboard_path/toolchain:native_target") {
     if (defined(no_pedantic_warnings_config_path)) {
       configs = [ no_pedantic_warnings_config_path ]
     }

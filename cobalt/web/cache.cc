@@ -153,44 +153,45 @@ void Cache::Fetcher::OnReadCompleted(net::URLRequest* request, int bytes_read) {
 script::HandlePromiseAny Cache::Match(
     script::EnvironmentSettings* environment_settings,
     const script::ValueHandleHolder& request) {
-  script::HandlePromiseAny promise =
-      get_script_value_factory(environment_settings)
-          ->CreateBasicPromise<script::Any>();
-  auto promise_reference =
-      std::make_unique<script::ValuePromiseAny::Reference>(this, promise);
+  auto* isolate = get_isolate(environment_settings);
+  script::v8c::EntryScope entry_scope(isolate);
+  auto resolver =
+      v8::Promise::Resolver::New(isolate->GetCurrentContext()).ToLocalChecked();
+  std::vector<v8::TracedGlobal<v8::Value>*> traced_globals;
+  base::OnceClosure cleanup_traced;
+  cache_utils::Trace(isolate, {resolver}, traced_globals, cleanup_traced);
+  auto traced_resolver = traced_globals[0]->As<v8::Promise::Resolver>();
   auto context = get_context(environment_settings);
   context->message_loop()->task_runner()->PostTask(
       FROM_HERE,
       base::BindOnce(
           [](script::EnvironmentSettings* environment_settings, uint32_t key,
-             std::unique_ptr<script::ValuePromiseAny::Reference>
-                 promise_reference) {
-            auto global_environment =
-                get_global_environment(environment_settings);
-            auto* isolate = global_environment->isolate();
+             v8::TracedGlobal<v8::Promise::Resolver> traced_resolver,
+             base::OnceClosure cleanup_traced) {
+            base::ScopedClosureRunner finally(std::move(cleanup_traced));
+            auto* isolate = get_isolate(environment_settings);
             auto cached =
                 cache::Cache::GetInstance()->Retrieve(kResourceType, key);
             auto metadata =
                 cache::Cache::GetInstance()->Metadata(kResourceType, key);
+            script::v8c::EntryScope entry_scope(isolate);
+            auto resolver = traced_resolver.Get(isolate);
             if (!cached || !metadata || !metadata->FindKey("options")) {
-              promise_reference->value().Resolve(
-                  cache_utils::FromV8Value(isolate, v8::Undefined(isolate)));
+              cache_utils::Resolve(resolver);
               return;
             }
-            script::v8c::EntryScope entry_scope(isolate);
             auto response = cache_utils::CreateResponse(
                 isolate, *cached, *(metadata->FindKey("options")));
             if (!response) {
-              promise_reference->value().Reject();
-            } else {
-              promise_reference->value().Resolve(
-                  cache_utils::FromV8Value(isolate, response.value()));
+              cache_utils::Reject(resolver);
+              return;
             }
+            cache_utils::Resolve(resolver, response.value());
           },
           environment_settings,
           cache_utils::GetKey(environment_settings->base_url(), request),
-          std::move(promise_reference)));
-  return promise;
+          traced_resolver, std::move(cleanup_traced)));
+  return cache_utils::FromResolver(resolver);
 }
 
 void Cache::PerformAdd(
@@ -224,13 +225,16 @@ void Cache::PerformAdd(
 script::HandlePromiseVoid Cache::Add(
     script::EnvironmentSettings* environment_settings,
     const script::ValueHandleHolder& request) {
+  auto* global_wrappable = get_global_wrappable(environment_settings);
   auto request_reference =
-      std::make_unique<script::ValueHandleHolder::Reference>(this, request);
+      std::make_unique<script::ValueHandleHolder::Reference>(global_wrappable,
+                                                             request);
   script::HandlePromiseVoid promise =
       get_script_value_factory(environment_settings)
           ->CreateBasicPromise<void>();
   auto promise_reference =
-      std::make_unique<script::ValuePromiseVoid::Reference>(this, promise);
+      std::make_unique<script::ValuePromiseVoid::Reference>(global_wrappable,
+                                                            promise);
   auto context = get_context(environment_settings);
   context->message_loop()->task_runner()->PostTask(
       FROM_HERE,
@@ -244,15 +248,19 @@ script::HandlePromiseVoid Cache::Put(
     script::EnvironmentSettings* environment_settings,
     const script::ValueHandleHolder& request,
     const script::ValueHandleHolder& response) {
+  auto* global_wrappable = get_global_wrappable(environment_settings);
   auto request_reference =
-      std::make_unique<script::ValueHandleHolder::Reference>(this, request);
+      std::make_unique<script::ValueHandleHolder::Reference>(global_wrappable,
+                                                             request);
   auto response_reference =
-      std::make_unique<script::ValueHandleHolder::Reference>(this, response);
+      std::make_unique<script::ValueHandleHolder::Reference>(global_wrappable,
+                                                             response);
   script::HandlePromiseVoid promise =
       get_script_value_factory(environment_settings)
           ->CreateBasicPromise<void>();
   auto promise_reference =
-      std::make_unique<script::ValuePromiseVoid::Reference>(this, promise);
+      std::make_unique<script::ValuePromiseVoid::Reference>(global_wrappable,
+                                                            promise);
 
   auto* global_environment = get_global_environment(environment_settings);
   auto* isolate = global_environment->isolate();
@@ -312,13 +320,16 @@ script::HandlePromiseVoid Cache::Put(
 script::HandlePromiseBool Cache::Delete(
     script::EnvironmentSettings* environment_settings,
     const script::ValueHandleHolder& request) {
+  auto* global_wrappable = get_global_wrappable(environment_settings);
   script::HandlePromiseBool promise =
       get_script_value_factory(environment_settings)
           ->CreateBasicPromise<bool>();
   auto request_reference =
-      std::make_unique<script::ValueHandleHolder::Reference>(this, request);
+      std::make_unique<script::ValueHandleHolder::Reference>(global_wrappable,
+                                                             request);
   auto promise_reference =
-      std::make_unique<script::ValuePromiseBool::Reference>(this, promise);
+      std::make_unique<script::ValuePromiseBool::Reference>(global_wrappable,
+                                                            promise);
   auto context = get_context(environment_settings);
   context->message_loop()->task_runner()->PostTask(
       FROM_HERE,
@@ -345,11 +356,12 @@ script::HandlePromiseBool Cache::Delete(
 
 script::HandlePromiseAny Cache::Keys(
     script::EnvironmentSettings* environment_settings) {
+  auto* global_wrappable = get_global_wrappable(environment_settings);
   script::HandlePromiseAny promise =
       get_script_value_factory(environment_settings)
           ->CreateBasicPromise<script::Any>();
-  auto promise_reference =
-      std::make_unique<script::ValuePromiseAny::Reference>(this, promise);
+  auto promise_reference = std::make_unique<script::ValuePromiseAny::Reference>(
+      global_wrappable, promise);
   auto context = get_context(environment_settings);
   context->message_loop()->task_runner()->PostTask(
       FROM_HERE,
@@ -400,7 +412,9 @@ void Cache::OnFetchCompleted(uint32_t key, bool success) {
 void Cache::OnFetchCompletedMainThread(uint32_t key, bool success) {
   auto* fetcher = fetchers_[key].get();
   auto* promises = &(fetch_contexts_[key].first);
-  if (!success) {
+  int status = fetcher->response_code();
+  // |status| of 200-299 excluding 206 "Partial Content" should be cached.
+  if (!success || status == 206 || status < 200 || status > 299) {
     {
       base::AutoLock auto_lock(*fetcher->lock());
       while (promises->size() > 0) {
@@ -416,21 +430,24 @@ void Cache::OnFetchCompletedMainThread(uint32_t key, bool success) {
     base::DictionaryValue metadata;
     metadata.SetKey("url", base::Value(fetcher->url().spec()));
     base::DictionaryValue options;
-    options.SetKey("status", base::Value(fetcher->response_code()));
+    options.SetKey("status", base::Value(status));
     options.SetKey("statusText", base::Value(fetcher->status_text()));
     options.SetKey("headers", std::move(fetcher->headers()));
     metadata.SetKey("options", std::move(options));
 
     cache::Cache::GetInstance()->Store(
         kResourceType, key, fetcher->BufferToVector(), std::move(metadata));
-    if (fetcher->mime_type() == "text/javascript") {
-      auto* environment_settings = fetch_contexts_[key].second;
-      auto* global_environment = get_global_environment(environment_settings);
-      auto* isolate = global_environment->isolate();
-      script::v8c::EntryScope entry_scope(isolate);
-      global_environment->Compile(script::SourceCode::CreateSourceCode(
-          fetcher->BufferToString(), base::SourceLocation(__FILE__, 1, 1)));
-    }
+  }
+  if (fetcher->mime_type() == "text/javascript") {
+    auto* environment_settings = fetch_contexts_[key].second;
+    auto* global_environment = get_global_environment(environment_settings);
+    auto* isolate = global_environment->isolate();
+    script::v8c::EntryScope entry_scope(isolate);
+    // TODO: compile async or maybe don't cache if compile fails.
+    global_environment->Compile(script::SourceCode::CreateSourceCode(
+        fetcher->BufferToString(), base::SourceLocation(__FILE__, 1, 1)));
+  }
+  {
     base::AutoLock auto_lock(*fetcher->lock());
     while (promises->size() > 0) {
       promises->back()->value().Resolve();

@@ -31,9 +31,11 @@
 #include "cobalt/web/user_agent_platform_info.h"
 #include "cobalt/web/window_or_worker_global_scope.h"
 #include "cobalt/web/window_timers.h"
+#include "cobalt/worker/service_worker_consts.h"
 #include "cobalt/worker/service_worker_object.h"
 #include "cobalt/worker/worker_location.h"
 #include "cobalt/worker/worker_navigator.h"
+#include "net/base/mime_util.h"
 #include "starboard/atomic.h"
 #include "url/gurl.h"
 
@@ -41,7 +43,6 @@ namespace cobalt {
 namespace worker {
 
 namespace {
-bool PermitAnyURL(const GURL& url, bool) { return true; }
 
 class ScriptLoader : public base::MessageLoop::DestructionObserver {
  public:
@@ -93,7 +94,7 @@ class ScriptLoader : public base::MessageLoop::DestructionObserver {
     script_loader_factory_.reset();
   }
 
-  void Load(const loader::Origin& origin,
+  void Load(web::CspDelegate* csp_delegate, const loader::Origin& origin,
             const std::vector<GURL>& resolved_urls) {
     TRACE_EVENT0("cobalt::worker", "ScriptLoader::Load()");
     number_of_loads_ = resolved_urls.size();
@@ -105,20 +106,23 @@ class ScriptLoader : public base::MessageLoop::DestructionObserver {
     for (int i = 0; i < resolved_urls.size(); ++i) {
       const GURL& url = resolved_urls[i];
       thread_->message_loop()->task_runner()->PostTask(
-          FROM_HERE, base::BindOnce(&ScriptLoader::LoaderTask,
-                                    base::Unretained(this), &loaders_[i],
-                                    origin, url, &contents_[i], &errors_[i]));
+          FROM_HERE,
+          base::BindOnce(&ScriptLoader::LoaderTask, base::Unretained(this),
+                         csp_delegate, &loaders_[i], origin, url, &contents_[i],
+                         &errors_[i]));
     }
     load_finished_.Wait();
   }
 
-  void LoaderTask(std::unique_ptr<loader::Loader>* loader,
+  void LoaderTask(web::CspDelegate* csp_delegate,
+                  std::unique_ptr<loader::Loader>* loader,
                   const loader::Origin& origin, const GURL& url,
                   std::unique_ptr<std::string>* content,
                   std::unique_ptr<std::string>* error) {
     TRACE_EVENT0("cobalt::worker", "ScriptLoader::LoaderTask()");
-    // Todo: implement csp check (b/225037465)
-    csp::SecurityCallback csp_callback = base::Bind(&PermitAnyURL);
+    csp::SecurityCallback csp_callback =
+        base::Bind(&web::CspDelegate::CanLoad, base::Unretained(csp_delegate),
+                   web::CspDelegate::kWorker);
 
     bool skip_fetch_intercept =
         context_->GetWindowOrWorkerGlobalScope()->IsServiceWorker();
@@ -133,9 +137,11 @@ class ScriptLoader : public base::MessageLoop::DestructionObserver {
               *output_content = std::move(content);
             },
             content),
+        base::Bind(&ScriptLoader::UpdateOnResponseStarted,
+                   base::Unretained(this), error),
         base::Bind(&ScriptLoader::LoadingCompleteCallback,
                    base::Unretained(this), loader, error),
-        skip_fetch_intercept);
+        net::HttpRequestHeaders(), skip_fetch_intercept);
   }
 
   void LoadingCompleteCallback(std::unique_ptr<loader::Loader>* loader,
@@ -155,6 +161,31 @@ class ScriptLoader : public base::MessageLoop::DestructionObserver {
                          },
                          &load_finished_));
     }
+  }
+
+  bool UpdateOnResponseStarted(
+      std::unique_ptr<std::string>* error, loader::Fetcher* fetcher,
+      const scoped_refptr<net::HttpResponseHeaders>& headers) {
+    std::string content_type;
+    bool mime_type_is_javascript = false;
+    if (headers->GetNormalizedHeader("Content-type", &content_type)) {
+      for (auto mime_type : ServiceWorkerConsts::kJavaScriptMimeTypes) {
+        if (net::MatchesMimeType(mime_type, content_type)) {
+          mime_type_is_javascript = true;
+          break;
+        }
+      }
+    }
+    if (content_type.empty()) {
+      error->reset(new std::string(base::StringPrintf(
+          ServiceWorkerConsts::kServiceWorkerRegisterNoMIMEError,
+          content_type.c_str())));
+    } else if (!mime_type_is_javascript) {
+      error->reset(new std::string(base::StringPrintf(
+          ServiceWorkerConsts::kServiceWorkerRegisterBadMIMEError,
+          content_type.c_str())));
+    }
+    return true;
   }
 
   std::unique_ptr<std::string>& GetContents(int index) {
@@ -186,14 +217,10 @@ class ScriptLoader : public base::MessageLoop::DestructionObserver {
 
 }  // namespace
 
-WorkerGlobalScope::WorkerGlobalScope(script::EnvironmentSettings* settings)
-    : web::WindowOrWorkerGlobalScope(
-          settings, /*stat_tracker=*/NULL,
-          // Using default options for CSP
-          web::WindowOrWorkerGlobalScope::Options(
-              // TODO (b/233788170): once application state is
-              // available, update this to use the actual state.
-              base::ApplicationState::kApplicationStateStarted)),
+WorkerGlobalScope::WorkerGlobalScope(
+    script::EnvironmentSettings* settings,
+    const web::WindowOrWorkerGlobalScope::Options& options)
+    : web::WindowOrWorkerGlobalScope(settings, options),
       location_(new WorkerLocation(settings->creation_url())),
       navigator_(new WorkerNavigator(settings)) {
   set_navigator_base(navigator_);
@@ -286,9 +313,8 @@ bool WorkerGlobalScope::LoadImportsAndReturnIfUpdated(
   web::EnvironmentSettings* settings = environment_settings();
   const GURL& base_url = settings->base_url();
   loader::Origin origin = loader::Origin(base_url.GetOrigin());
-  // TODO(b/241801523): Apply CSP.
   ScriptLoader script_loader(settings->context());
-  script_loader.Load(origin, request_urls);
+  script_loader.Load(csp_delegate(), origin, request_urls);
 
   for (int index = 0; index < request_urls.size(); ++index) {
     const auto& error = script_loader.GetError(index);
@@ -378,9 +404,8 @@ void WorkerGlobalScope::ImportScriptsInternal(
   //      object, passing along any custom perform the fetch steps provided.
   //      If this succeeds, let script be the result. Otherwise, rethrow the
   //      exception.
-  // TODO(b/241801523): Apply CSP.
   ScriptLoader script_loader(settings->context());
-  script_loader.Load(origin, request_urls);
+  script_loader.Load(csp_delegate(), origin, request_urls);
 
   // 5. For each url in the resulting URL records, run these substeps:
   int content_lookup_index = 0;

@@ -23,6 +23,9 @@ DIR="$(dirname "${0}")"
 AUTH_METHOD="public-key"
 USE_COMPRESSED_SYSTEM_IMAGE="false"
 SYSTEM_IMAGE_EXTENSION=".so"
+
+DISABLE_TESTS="false"
+
 while getopts "d:a:c" o; do
     case "${o}" in
         d)
@@ -89,9 +92,14 @@ do
 
     log "info" " [ RUN      ] ${TEST_NAME} attempt ${attempt}"
 
-    run_test
 
-    RESULT=$?
+    if [[ "${DISABLE_TESTS}" == "true" ]]; then
+      # Set the result to skipped.
+      RESULT=2
+    else
+      run_test
+      RESULT=$?
+    fi
 
     stop_cobalt &> /dev/null
 

@@ -30,8 +30,7 @@
 #include "cobalt/script/promise.h"
 #include "cobalt/script/script_value.h"
 #include "cobalt/web/cache_utils.h"
-#include "cobalt/web/context.h"
-#include "cobalt/web/environment_settings.h"
+#include "cobalt/worker/service_worker_consts.h"
 #include "cobalt/worker/service_worker_jobs.h"
 #include "cobalt/worker/service_worker_registration_object.h"
 #include "cobalt/worker/service_worker_update_via_cache.h"
@@ -46,7 +45,6 @@ namespace worker {
 
 namespace {
 // ServiceWorkerRegistrationMap persistent settings keys.
-const char kSettingsJson[] = "service_worker_settings.json";
 const char kSettingsKeyList[] = "key_list";
 
 // ServiceWorkerRegistrationObject persistent settings keys.
@@ -66,6 +64,7 @@ const char kSettingsScriptResourceMapScriptUrlsKey[] =
 const char kSettingsSetOfUsedScriptsKey[] = "set_of_used_scripts";
 const char kSettingsSkipWaitingKey[] = "skip_waiting";
 const char kSettingsClassicScriptsImportedKey[] = "classic_scripts_imported";
+const char kSettingsRawHeadersKey[] = "raw_headers";
 
 bool CheckPersistentValue(
     std::string key_string, std::string settings_key,
@@ -87,8 +86,8 @@ bool CheckPersistentValue(
 ServiceWorkerPersistentSettings::ServiceWorkerPersistentSettings(
     const Options& options)
     : options_(options) {
-  persistent_settings_.reset(
-      new cobalt::persistent_storage::PersistentSettings(kSettingsJson));
+  persistent_settings_.reset(new cobalt::persistent_storage::PersistentSettings(
+      ServiceWorkerConsts::kSettingsJson));
   persistent_settings_->ValidatePersistentSettings();
   DCHECK(persistent_settings_);
 
@@ -113,7 +112,7 @@ void ServiceWorkerPersistentSettings::ReadServiceWorkerRegistrationMapSettings(
         persistent_settings_->GetPersistentSettingAsDictionary(key_string);
     if (dict.empty()) {
       DLOG(INFO) << "Key: " << key_string << " does not exist in "
-                 << kSettingsJson;
+                 << ServiceWorkerConsts::kSettingsJson;
       continue;
     }
     if (!CheckPersistentValue(key_string, kSettingsStorageKeyKey, dict,
@@ -121,6 +120,12 @@ void ServiceWorkerPersistentSettings::ReadServiceWorkerRegistrationMapSettings(
       continue;
     url::Origin storage_key =
         url::Origin::Create(GURL(dict[kSettingsStorageKeyKey]->GetString()));
+
+    // Only add persisted workers to the registration_map
+    // if their storage_key matches the origin of the initial_url.
+    if (!storage_key.IsSameOriginWith(url::Origin::Create(options_.url))) {
+      continue;
+    }
 
     if (!CheckPersistentValue(key_string, kSettingsScopeUrlKey, dict,
                               base::Value::Type::STRING))
@@ -157,24 +162,32 @@ void ServiceWorkerPersistentSettings::ReadServiceWorkerRegistrationMapSettings(
       continue;
 
     if (CheckPersistentValue(key_string, kSettingsLastUpdateCheckTimeKey, dict,
-                             base::Value::Type::DOUBLE)) {
-      double last_update_check_time =
-          dict[kSettingsLastUpdateCheckTimeKey]->GetDouble();
+                             base::Value::Type::STRING)) {
+      int64_t last_update_check_time =
+          std::atol(dict[kSettingsLastUpdateCheckTimeKey]->GetString().c_str());
       registration->set_last_update_check_time(
           base::Time::FromDeltaSinceWindowsEpoch(
-              base::TimeDelta::FromMicroseconds(
-                  (int64_t)dict[kSettingsLastUpdateCheckTimeKey]
-                      ->GetDouble())));
+              base::TimeDelta::FromMicroseconds(last_update_check_time)));
     }
 
-    // Persisted registration and worker are valid, add the registration
-    // to the registration_map and key_set_.
     key_set_.insert(key_string);
     registration_map.insert(std::make_pair(key, registration));
+    registration->set_is_persisted(true);
 
-    // TODO(b/228904017)
-    // Not in spec. Run SoftUpdate on the new registration.
-    options_.service_worker_jobs->SoftUpdate(registration);
+    options_.service_worker_jobs->message_loop()->task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ServiceWorkerJobs::Activate,
+                       base::Unretained(options_.service_worker_jobs),
+                       registration));
+
+    auto job = options_.service_worker_jobs->CreateJobWithoutPromise(
+        ServiceWorkerJobs::JobType::kUpdate, storage_key, scope,
+        registration->waiting_worker()->script_url());
+    options_.service_worker_jobs->message_loop()->task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ServiceWorkerJobs::ScheduleJob,
+                       base::Unretained(options_.service_worker_jobs),
+                       std::move(job)));
   }
 }
 
@@ -236,10 +249,21 @@ bool ServiceWorkerPersistentSettings::ReadServiceWorkerObjectSettings(
       if (data == nullptr) {
         return false;
       }
-      std::string script_string(data->begin(), data->end());
-      auto result = script_resource_map.insert(std::make_pair(
-          script_url,
-          ScriptResource(std::make_unique<std::string>(script_string))));
+      auto script_resource = ScriptResource(std::make_unique<std::string>(
+          std::string(data->begin(), data->end())));
+      if (script_url == worker->script_url()) {
+        // Get the persistent headers for the ServiceWorkerObject script_url_.
+        // This is used in ServiceWorkerObject::Initialize().
+        base::Value* raw_header_value = value_dict->FindKeyOfType(
+            kSettingsRawHeadersKey, base::Value::Type::STRING);
+        if (raw_header_value == nullptr) return false;
+        const scoped_refptr<net::HttpResponseHeaders> headers =
+            scoped_refptr<net::HttpResponseHeaders>(
+                new net::HttpResponseHeaders(raw_header_value->GetString()));
+        script_resource.headers = headers;
+      }
+      auto result = script_resource_map.insert(
+          std::make_pair(script_url, std::move(script_resource)));
       DCHECK(result.second);
     }
   }
@@ -248,9 +272,7 @@ bool ServiceWorkerPersistentSettings::ReadServiceWorkerObjectSettings(
   }
   worker->set_script_resource_map(std::move(script_resource_map));
 
-  options_.service_worker_jobs->UpdateWorkerState(worker,
-                                                  kServiceWorkerStateActivated);
-  registration->set_active_worker(worker);
+  registration->set_waiting_worker(worker);
 
   return true;
 }
@@ -310,10 +332,10 @@ void ServiceWorkerPersistentSettings::
       std::make_unique<base::Value>(registration->update_via_cache_mode()));
 
   dict.try_emplace(kSettingsLastUpdateCheckTimeKey,
-                   std::make_unique<base::Value>(static_cast<double>(
-                       registration->last_update_check_time()
-                           .ToDeltaSinceWindowsEpoch()
-                           .InMicroseconds())));
+                   std::make_unique<base::Value>(
+                       std::to_string(registration->last_update_check_time()
+                                          .ToDeltaSinceWindowsEpoch()
+                                          .InMicroseconds())));
 
   persistent_settings_->SetPersistentSetting(
       key_string, std::make_unique<base::Value>(dict));
@@ -365,6 +387,14 @@ ServiceWorkerPersistentSettings::WriteServiceWorkerObjectSettings(
         web::cache_utils::GetKey(registration_key_string + script_url_string),
         data,
         /* metadata */ base::nullopt);
+
+    if (script_url_string == service_worker_object->script_url().spec()) {
+      // Persist the raw headers from the ServiceWorkerObject script_url_
+      // ScriptResource headers.
+      dict.try_emplace(kSettingsRawHeadersKey,
+                       std::make_unique<base::Value>(
+                           script_resource.second.headers->raw_headers()));
+    }
   }
   dict.try_emplace(kSettingsScriptResourceMapScriptUrlsKey,
                    std::make_unique<base::Value>(std::move(script_urls_value)));

@@ -72,6 +72,15 @@ class HTTPTransport {
   //! \param[in] timeout The request timeout, in seconds.
   void SetTimeout(double timeout);
 
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+  //! \brief Sets the absolute path to a directory containing certificates in
+  //!     lieu of the system CA cert bundle.
+  //!
+  //! \param[in] path The path to a directory containing cert files in PEM
+  //!     format to be used for TLS connections.
+  void SetRootCACertificatesDirectoryPath(const std::string& path);
+#else
+
   //! \brief Sets a certificate file to be used in lieu of the system CA cert
   //!     bundle.
   //!
@@ -81,6 +90,7 @@ class HTTPTransport {
   //! \param[in] cert The filename of a file in PEM format containing the CA
   //!     cert to be used for TLS connections.
   void SetRootCACertificatePath(const base::FilePath& cert);
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
 
   //! \brief Performs the HTTP request with the configured parameters and waits
   //!     for the execution to complete.
@@ -101,14 +111,24 @@ class HTTPTransport {
   const HTTPHeaders& headers() const { return headers_; }
   HTTPBodyStream* body_stream() const { return body_stream_.get(); }
   double timeout() const { return timeout_; }
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+  const std::string& root_ca_certificates_directory_path() const {
+    return root_ca_certificates_directory_path_;
+  }
+#else
   const base::FilePath& root_ca_certificate_path() const {
     return root_ca_certificate_path_;
   }
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
 
  private:
   std::string url_;
   std::string method_;
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+  std::string root_ca_certificates_directory_path_;
+#else
   base::FilePath root_ca_certificate_path_;
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
   HTTPHeaders headers_;
   std::unique_ptr<HTTPBodyStream> body_stream_;
   double timeout_;

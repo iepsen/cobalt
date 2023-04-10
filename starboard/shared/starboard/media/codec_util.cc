@@ -49,16 +49,14 @@ VideoConfig::VideoConfig(SbMediaVideoCodec video_codec,
   }
 }
 
-VideoConfig::VideoConfig(const SbMediaVideoSampleInfo& video_sample_info,
+VideoConfig::VideoConfig(const VideoStreamInfo& video_stream_info,
                          const uint8_t* data,
                          size_t size)
-    : VideoConfig(video_sample_info.codec,
-                  video_sample_info.frame_width,
-                  video_sample_info.frame_height,
+    : VideoConfig(video_stream_info.codec,
+                  video_stream_info.frame_width,
+                  video_stream_info.frame_height,
                   data,
-                  size) {
-  SB_DCHECK(video_sample_info.is_key_frame);
-}
+                  size) {}
 
 bool VideoConfig::operator==(const VideoConfig& that) const {
   if (video_codec_ == kSbMediaVideoCodecNone &&
@@ -101,6 +99,11 @@ SbMediaAudioCodec GetAudioCodecFromString(const char* codec) {
     return kSbMediaAudioCodecFlac;
   }
 #endif  // SB_API_VERSION >= 14
+#if SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
+  if (strncmp(codec, "iamf.", 5) == 0) {
+    return kSbMediaAudioCodecIamf;
+  }
+#endif  // SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
   return kSbMediaAudioCodecNone;
 }
 

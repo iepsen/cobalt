@@ -54,6 +54,9 @@ namespace shared {
 
 namespace {
 
+using std::placeholders::_1;
+using std::placeholders::_2;
+
 SbMediaAudioSampleType GetSupportedSampleType() {
   SB_DCHECK(SbAudioSinkIsAudioSampleTypeSupported(
       kSbMediaAudioSampleTypeInt16Deprecated));
@@ -66,14 +69,12 @@ void* IncrementPointerByBytes(void* pointer, int offset) {
 
 }  // namespace
 
-AudioDecoder::AudioDecoder(SbMediaAudioCodec audio_codec,
-                           const SbMediaAudioSampleInfo& audio_sample_info,
+AudioDecoder::AudioDecoder(const AudioStreamInfo& audio_stream_info,
                            SbDrmSystem drm_system)
-    : audio_codec_(audio_codec),
-      audio_sample_info_(audio_sample_info),
+    : audio_stream_info_(audio_stream_info),
       sample_type_(GetSupportedSampleType()),
-      output_sample_rate_(audio_sample_info.samples_per_second),
-      output_channel_count_(audio_sample_info.number_of_channels),
+      output_sample_rate_(audio_stream_info.samples_per_second),
+      output_channel_count_(audio_stream_info.number_of_channels),
       drm_system_(static_cast<DrmSystem*>(drm_system)) {
   if (!InitializeCodec()) {
     SB_LOG(ERROR) << "Failed to initialize audio decoder.";
@@ -94,7 +95,8 @@ void AudioDecoder::Initialize(const OutputCB& output_cb,
   output_cb_ = output_cb;
   error_cb_ = error_cb;
 
-  media_decoder_->Initialize(error_cb_);
+  media_decoder_->Initialize(
+      std::bind(&AudioDecoder::ReportError, this, _1, _2));
 }
 
 void AudioDecoder::Decode(const InputBuffers& input_buffers,
@@ -103,6 +105,8 @@ void AudioDecoder::Decode(const InputBuffers& input_buffers,
   SB_DCHECK(!input_buffers.empty());
   SB_DCHECK(output_cb_);
   SB_DCHECK(media_decoder_);
+
+  audio_frame_discarder_.OnInputBuffers(input_buffers);
 
   for (const auto& input_buffer : input_buffers) {
     VERBOSE_MEDIA_LOG() << "T1: timestamp " << input_buffer->timestamp();
@@ -147,7 +151,7 @@ scoped_refptr<AudioDecoder::DecodedAudio> AudioDecoder::Read(
     Schedule(consumed_cb_);
     consumed_cb_ = nullptr;
   }
-  *samples_per_second = audio_sample_info_.samples_per_second;
+  *samples_per_second = audio_stream_info_.samples_per_second;
   return result;
 }
 
@@ -156,6 +160,7 @@ void AudioDecoder::Reset() {
   SB_DCHECK(output_cb_);
 
   media_decoder_.reset();
+  audio_frame_discarder_.Reset();
 
   if (!InitializeCodec()) {
     // TODO: Communicate this failure to our clients somehow.
@@ -173,11 +178,11 @@ void AudioDecoder::Reset() {
 
 bool AudioDecoder::InitializeCodec() {
   SB_DCHECK(!media_decoder_);
-  media_decoder_.reset(
-      new MediaDecoder(this, audio_codec_, audio_sample_info_, drm_system_));
+  media_decoder_.reset(new MediaDecoder(this, audio_stream_info_, drm_system_));
   if (media_decoder_->is_valid()) {
     if (error_cb_) {
-      media_decoder_->Initialize(error_cb_);
+      media_decoder_->Initialize(
+          std::bind(&AudioDecoder::ReportError, this, _1, _2));
     }
     return true;
   }
@@ -195,12 +200,17 @@ void AudioDecoder::ProcessOutputBuffer(
   if (dequeue_output_result.num_bytes > 0) {
     ScopedJavaByteBuffer byte_buffer(
         media_codec_bridge->GetOutputBuffer(dequeue_output_result.index));
-    SB_DCHECK(!byte_buffer.IsNull());
+
+    if (byte_buffer.IsNull()) {
+      ReportError(kSbPlayerErrorDecode,
+                  "Failed to process audio output buffer.");
+      return;
+    }
 
     int16_t* data = static_cast<int16_t*>(IncrementPointerByBytes(
         byte_buffer.address(), dequeue_output_result.offset));
     int size = dequeue_output_result.num_bytes;
-    if (2 * audio_sample_info_.samples_per_second == output_sample_rate_) {
+    if (2 * audio_stream_info_.samples_per_second == output_sample_rate_) {
       // The audio is encoded using implicit HE-AAC.  As the audio sink has
       // been created already we try to down-mix the decoded data to half of
       // its channels so the audio sink can play it with the correct pitch.
@@ -212,11 +222,13 @@ void AudioDecoder::ProcessOutputBuffer(
     }
 
     scoped_refptr<DecodedAudio> decoded_audio = new DecodedAudio(
-        audio_sample_info_.number_of_channels, sample_type_,
+        audio_stream_info_.number_of_channels, sample_type_,
         kSbMediaAudioFrameStorageTypeInterleaved,
         dequeue_output_result.presentation_time_microseconds, size);
 
-    memcpy(decoded_audio->buffer(), data, size);
+    memcpy(decoded_audio->data(), data, size);
+    audio_frame_discarder_.AdjustForDiscardedDurations(
+        audio_stream_info_.samples_per_second, &decoded_audio);
 
     {
       starboard::ScopedLock lock(decoded_audios_mutex_);
@@ -233,6 +245,7 @@ void AudioDecoder::ProcessOutputBuffer(
       starboard::ScopedLock lock(decoded_audios_mutex_);
       decoded_audios_.push(new DecodedAudio());
     }
+    audio_frame_discarder_.OnDecodedAudioEndOfStream();
     Schedule(output_cb_);
   }
 
@@ -248,6 +261,17 @@ void AudioDecoder::RefreshOutputFormat(MediaCodecBridge* media_codec_bridge) {
   }
   output_sample_rate_ = output_format.sample_rate;
   output_channel_count_ = output_format.channel_count;
+}
+
+void AudioDecoder::ReportError(SbPlayerError error,
+                               const std::string& error_message) {
+  SB_DCHECK(error_cb_);
+
+  if (!error_cb_) {
+    return;
+  }
+
+  error_cb_(kSbPlayerErrorDecode, error_message);
 }
 
 }  // namespace shared

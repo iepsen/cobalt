@@ -15,15 +15,6 @@
 import("//build/toolchain/gcc_toolchain.gni")
 import("//starboard/raspi/shared/toolchain/raspi_shared_toolchain.gni")
 
-clang_toolchain("host") {
-  clang_base_path = clang_base_path
-
-  toolchain_args = {
-    current_os = "linux"
-    current_cpu = "x86"
-  }
-}
-
 gcc_toolchain("target") {
   cc = gcc_toolchain_cc
   cxx = gcc_toolchain_cxx
@@ -35,6 +26,23 @@ gcc_toolchain("target") {
   tail_lib_dependencies = "-l:libpthread.so.0"
 
   toolchain_args = {
+    is_clang = false
+  }
+}
+
+gcc_toolchain("native_target") {
+  cc = gcc_toolchain_cc
+  cxx = gcc_toolchain_cxx
+  ld = cxx
+
+  # We use whatever 'ar' resolves to.
+  ar = gcc_toolchain_ar
+
+  tail_lib_dependencies = "-l:libpthread.so.0"
+
+  toolchain_args = {
+    is_starboard = false
+    is_native_target_build = true
     is_clang = false
   }
 }

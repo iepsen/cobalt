@@ -28,6 +28,7 @@
 #include "base/message_loop/message_loop_current.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/task_runner.h"
 #include "base/time/time.h"
@@ -51,6 +52,7 @@
 #include "cobalt/worker/extendable_message_event.h"
 #include "cobalt/worker/frame_type.h"
 #include "cobalt/worker/service_worker.h"
+#include "cobalt/worker/service_worker_consts.h"
 #include "cobalt/worker/service_worker_container.h"
 #include "cobalt/worker/service_worker_global_scope.h"
 #include "cobalt/worker/service_worker_registration.h"
@@ -60,7 +62,7 @@
 #include "cobalt/worker/worker_type.h"
 #include "net/base/mime_util.h"
 #include "net/base/url_util.h"
-#include "starboard/atomic.h"
+#include "starboard/common/atomic.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -69,6 +71,13 @@ namespace cobalt {
 namespace worker {
 
 namespace {
+
+const base::TimeDelta kWaitForAsynchronousExtensionsTimeout =
+    base::TimeDelta::FromSeconds(3);
+
+const base::TimeDelta kShutdownWaitTimeoutSecs =
+    base::TimeDelta::FromSeconds(5);
+
 bool PathContainsEscapedSlash(const GURL& url) {
   const std::string path = url.path();
   return (path.find("%2f") != std::string::npos ||
@@ -129,7 +138,8 @@ bool PermitAnyNonRedirectedURL(const GURL&, bool did_redirect) {
 ServiceWorkerJobs::ServiceWorkerJobs(web::WebSettings* web_settings,
                                      network::NetworkModule* network_module,
                                      web::UserAgentPlatformInfo* platform_info,
-                                     base::MessageLoop* message_loop)
+                                     base::MessageLoop* message_loop,
+                                     const GURL& url)
     : message_loop_(message_loop) {
   DCHECK_EQ(message_loop_, base::MessageLoop::current());
   fetcher_factory_.reset(new loader::FetcherFactory(network_module));
@@ -140,7 +150,7 @@ ServiceWorkerJobs::ServiceWorkerJobs(web::WebSettings* web_settings,
   DCHECK(script_loader_factory_);
 
   ServiceWorkerPersistentSettings::Options options(web_settings, network_module,
-                                                   platform_info, this);
+                                                   platform_info, this, url);
   scope_to_registration_map_.reset(new ServiceWorkerRegistrationMap(options));
   DCHECK(scope_to_registration_map_);
 }
@@ -150,15 +160,21 @@ ServiceWorkerJobs::~ServiceWorkerJobs() {
   scope_to_registration_map_->HandleUserAgentShutdown(this);
   scope_to_registration_map_->AbortAllActive();
   scope_to_registration_map_.reset();
-  while (!web_context_registrations_.empty()) {
-    // Wait for web context registrations to be cleared.
-    web_context_registrations_cleared_.Wait();
-  }
-}
+  if (!web_context_registrations_.empty()) {
+    // Abort any Service Workers that remain.
+    for (auto& context : web_context_registrations_) {
+      DCHECK(context);
+      if (context->GetWindowOrWorkerGlobalScope()->IsServiceWorker()) {
+        ServiceWorkerGlobalScope* service_worker =
+            context->GetWindowOrWorkerGlobalScope()->AsServiceWorker();
+        if (service_worker && service_worker->service_worker_object()) {
+          service_worker->service_worker_object()->Abort();
+        }
+      }
+    }
 
-void ServiceWorkerJobs::Stop() {
-  if (!done_event_.IsSignaled()) {
-    done_event_.Signal();
+    // Wait for web context registrations to be cleared.
+    web_context_registrations_cleared_.TimedWait(kShutdownWaitTimeoutSecs);
   }
 }
 
@@ -495,10 +511,13 @@ void ServiceWorkerJobs::Register(Job* job) {
   if (!job_script_origin.IsSameOriginWith(job_referrer_origin)) {
     // 2.1. Invoke Reject Job Promise with job and "SecurityError" DOMException.
     RejectJobPromise(
-        job, PromiseErrorData(
-                 web::DOMException::kSecurityErr,
-                 "Service Worker Register failed: Script URL and referrer "
-                 "origin are not the same."));
+        job,
+        PromiseErrorData(
+            web::DOMException::kSecurityErr,
+            base::StringPrintf(
+                ServiceWorkerConsts::
+                    kServiceWorkerRegisterScriptOriginNotSameError,
+                job->script_url.spec().c_str(), job->referrer.spec().c_str())));
     // 2.2. Invoke Finish Job with job and abort these steps.
     FinishJob(job);
     return;
@@ -510,10 +529,13 @@ void ServiceWorkerJobs::Register(Job* job) {
   if (!job_scope_origin.IsSameOriginWith(job_referrer_origin)) {
     // 3.1. Invoke Reject Job Promise with job and "SecurityError" DOMException.
     RejectJobPromise(
-        job, PromiseErrorData(
-                 web::DOMException::kSecurityErr,
-                 "Service Worker Register failed: Scope URL and referrer "
-                 "origin are not the same."));
+        job,
+        PromiseErrorData(
+            web::DOMException::kSecurityErr,
+            base::StringPrintf(
+                ServiceWorkerConsts::
+                    kServiceWorkerRegisterScopeOriginNotSameError,
+                job->scope_url.spec().c_str(), job->referrer.spec().c_str())));
 
     // 3.2. Invoke Finish Job with job and abort these steps.
     FinishJob(job);
@@ -559,8 +581,7 @@ void ServiceWorkerJobs::Register(Job* job) {
 }
 
 void ServiceWorkerJobs::SoftUpdate(
-    scoped_refptr<ServiceWorkerRegistrationObject> registration,
-    bool force_bypass_cache) {
+    ServiceWorkerRegistrationObject* registration, bool force_bypass_cache) {
   TRACE_EVENT0("cobalt::worker", "ServiceWorkerJobs::SoftUpdate()");
   DCHECK_EQ(message_loop(), base::MessageLoop::current());
   DCHECK(registration);
@@ -578,9 +599,9 @@ void ServiceWorkerJobs::SoftUpdate(
   // 3. Let job be the result of running Create Job with update, registration’s
   // storage key, registration’s scope url, newestWorker’s script url, null, and
   // null.
-  std::unique_ptr<Job> job =
-      CreateJob(kUpdate, registration->storage_key(), registration->scope_url(),
-                newest_worker->script_url());
+  std::unique_ptr<Job> job = CreateJobWithoutPromise(
+      kUpdate, registration->storage_key(), registration->scope_url(),
+      newest_worker->script_url());
 
   // 4. Set job’s worker type to newestWorker’s type.
   // Cobalt only supports 'classic' worker type.
@@ -593,6 +614,33 @@ void ServiceWorkerJobs::SoftUpdate(
       FROM_HERE, base::BindOnce(&ServiceWorkerJobs::ScheduleJob,
                                 base::Unretained(this), std::move(job)));
   DCHECK(!job.get());
+}
+
+void ServiceWorkerJobs::EnsureServiceWorkerStarted(
+    const url::Origin& storage_key, const GURL& client_url,
+    base::WaitableEvent* done_event) {
+  if (message_loop() != base::MessageLoop::current()) {
+    message_loop()->task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ServiceWorkerJobs::EnsureServiceWorkerStarted,
+                       base::Unretained(this), storage_key, client_url,
+                       done_event));
+    return;
+  }
+  base::ScopedClosureRunner signal_done(base::BindOnce(
+      [](base::WaitableEvent* done_event) { done_event->Signal(); },
+      done_event));
+  base::TimeTicks start = base::TimeTicks::Now();
+  auto registration =
+      scope_to_registration_map_->GetRegistration(storage_key, client_url);
+  if (!registration) {
+    return;
+  }
+  auto service_worker_object = registration->active_worker();
+  if (!service_worker_object || service_worker_object->is_running()) {
+    return;
+  }
+  service_worker_object->ObtainWebAgentAndWaitUntilDone();
 }
 
 void ServiceWorkerJobs::Update(Job* job) {
@@ -685,28 +733,6 @@ void ServiceWorkerJobs::Update(Job* job) {
       /*skip_fetch_intercept=*/true);
 }
 
-namespace {
-// Array of JavaScript mime types, according to the MIME Sniffinc spec:
-//   https://mimesniff.spec.whatwg.org/#javascript-mime-type
-static const char* const kJavaScriptMimeTypes[] = {"application/ecmascript",
-                                                   "application/javascript",
-                                                   "application/x-ecmascript",
-                                                   "application/x-javascript",
-                                                   "text/ecmascript",
-                                                   "text/javascript",
-                                                   "text/javascript1.0",
-                                                   "text/javascript1.1",
-                                                   "text/javascript1.2",
-                                                   "text/javascript1.3",
-                                                   "text/javascript1.4",
-                                                   "text/javascript1.5",
-                                                   "text/jscript",
-                                                   "text/livescript",
-                                                   "text/x-ecmascript",
-                                                   "text/x-javascript"};
-
-}  // namespace
-
 bool ServiceWorkerJobs::UpdateOnResponseStarted(
     scoped_refptr<UpdateJobState> state, loader::Fetcher* fetcher,
     const scoped_refptr<net::HttpResponseHeaders>& headers) {
@@ -715,7 +741,15 @@ bool ServiceWorkerJobs::UpdateOnResponseStarted(
   if (headers->GetNormalizedHeader("Content-type", &content_type)) {
     //   8.7.  Extract a MIME type from the response’s header list. If this MIME
     //         type (ignoring parameters) is not a JavaScript MIME type, then:
-    for (auto mime_type : kJavaScriptMimeTypes) {
+    if (content_type.empty()) {
+      RejectJobPromise(
+          state->job,
+          PromiseErrorData(
+              web::DOMException::kSecurityErr,
+              ServiceWorkerConsts::kServiceWorkerRegisterNoMIMEError));
+      return true;
+    }
+    for (auto mime_type : ServiceWorkerConsts::kJavaScriptMimeTypes) {
       if (net::MatchesMimeType(mime_type, content_type)) {
         mime_type_is_javascript = true;
         break;
@@ -726,17 +760,20 @@ bool ServiceWorkerJobs::UpdateOnResponseStarted(
     //   8.7.1. Invoke Reject Job Promise with job and "SecurityError"
     //          DOMException.
     //   8.7.2. Asynchronously complete these steps with a network error.
-    RejectJobPromise(state->job,
-                     PromiseErrorData(web::DOMException::kSecurityErr,
-                                      "Service Worker Script is not "
-                                      "JavaScript MIME type."));
+    RejectJobPromise(
+        state->job,
+        PromiseErrorData(
+            web::DOMException::kSecurityErr,
+            base::StringPrintf(
+                ServiceWorkerConsts::kServiceWorkerRegisterBadMIMEError,
+                content_type.c_str())));
     return true;
   }
   //   8.8.  Let serviceWorkerAllowed be the result of extracting header list
   //         values given `Service-Worker-Allowed` and response’s header list.
   std::string service_worker_allowed;
   bool service_worker_allowed_exists = headers->GetNormalizedHeader(
-      "Service-Worker-Allowed", &service_worker_allowed);
+      ServiceWorkerConsts::kServiceWorkerAllowed, &service_worker_allowed);
   //   8.9.  Set policyContainer to the result of creating a policy container
   //         from a fetch response given response.
   state->script_headers = headers;
@@ -778,9 +815,13 @@ bool ServiceWorkerJobs::UpdateOnResponseStarted(
     //   8.16.1. Invoke Reject Job Promise with job and "SecurityError"
     //           DOMException.
     //   8.16.2. Asynchronously complete these steps with a network error.
-    RejectJobPromise(state->job,
-                     PromiseErrorData(web::DOMException::kSecurityErr,
-                                      "Scope not allowed."));
+    RejectJobPromise(
+        state->job,
+        PromiseErrorData(
+            web::DOMException::kSecurityErr,
+            base::StringPrintf(
+                ServiceWorkerConsts::kServiceWorkerRegisterBadScopeError,
+                scope_string.c_str())));
     return true;
   }
   return true;
@@ -806,6 +847,14 @@ void ServiceWorkerJobs::UpdateOnContentProduced(
   DCHECK(updated_script_content);
   //   8.19. If response’s cache state is not "local", set registration’s last
   //         update check time to the current time.
+  scoped_refptr<ServiceWorkerRegistrationObject> registration =
+      scope_to_registration_map_->GetRegistration(state->job->storage_key,
+                                                  state->job->scope_url);
+  if (registration) {
+    registration->set_last_update_check_time(base::Time::Now());
+    scope_to_registration_map_->PersistRegistration(registration->storage_key(),
+                                                    registration->scope_url());
+  }
   // TODO(b/228904017):
   //   8.20. Set hasUpdatedResources to true if any of the following are true:
   //          - newestWorker is null.
@@ -840,7 +889,12 @@ void ServiceWorkerJobs::UpdateOnLoadingComplete(
   TRACE_EVENT0("cobalt::worker",
                "ServiceWorkerJobs::UpdateOnLoadingComplete()");
   DCHECK_EQ(message_loop(), base::MessageLoop::current());
-  if (!state->job->promise.get() || !state->job->client) {
+  bool check_promise = !state->job->no_promise_okay;
+  if (state->job->no_promise_okay && !state->job->client &&
+      web_context_registrations_.size() > 0) {
+    state->job->client = *(web_context_registrations_.begin());
+  }
+  if ((check_promise && !state->job->promise.get()) || !state->job->client) {
     // The job is already rejected, which means there was an error, or the
     // client is already shutdown, so finish the job and skip the remaining
     // steps.
@@ -851,7 +905,7 @@ void ServiceWorkerJobs::UpdateOnLoadingComplete(
   if (error) {
     RejectJobPromise(
         state->job,
-        PromiseErrorData(web::DOMException::kNetworkErr, error.value()));
+        PromiseErrorData(web::DOMException::kSecurityErr, error.value()));
     if (state->newest_worker == nullptr) {
       scope_to_registration_map_->RemoveRegistration(state->job->storage_key,
                                                      state->job->scope_url);
@@ -1012,6 +1066,23 @@ std::string* ServiceWorkerJobs::RunServiceWorker(ServiceWorkerObject* worker,
   return worker->start_status();
 }
 
+bool ServiceWorkerJobs::WaitForAsynchronousExtensions(
+    const scoped_refptr<ServiceWorkerRegistrationObject>& registration) {
+  // TODO(b/240164388): Investigate a better approach for combining waiting
+  // for the ExtendableEvent while also allowing use of algorithms that run
+  // on the same thread from the event handler.
+  base::TimeTicks wait_start_time = base::TimeTicks::Now();
+  do {
+    if (registration->done_event()->TimedWait(
+            base::TimeDelta::FromMilliseconds(100)))
+      break;
+    base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
+    base::RunLoop().RunUntilIdle();
+  } while ((base::TimeTicks::Now() - wait_start_time) <
+           kWaitForAsynchronousExtensionsTimeout);
+  return registration->done_event()->IsSignaled();
+}
+
 void ServiceWorkerJobs::Install(
     Job* job, const scoped_refptr<ServiceWorkerObject>& worker,
     const scoped_refptr<ServiceWorkerRegistrationObject>& registration) {
@@ -1044,7 +1115,7 @@ void ServiceWorkerJobs::Install(
   UpdateWorkerState(registration->installing_worker(),
                     kServiceWorkerStateInstalling);
   // 6. Assert: job’s job promise is not null.
-  DCHECK(job->promise.get() != nullptr);
+  DCHECK(job->no_promise_okay || job->promise.get() != nullptr);
   // 7. Invoke Resolve Job Promise with job and registration.
   ResolveJobPromise(job, registration);
   // 8. Let settingsObjects be all environment settings objects whose origin is
@@ -1105,8 +1176,8 @@ void ServiceWorkerJobs::Install(
     } else {
       // 11.3.1. Queue a task task on installingWorker’s event loop using the
       //         DOM manipulation task source to run the following steps:
-      DCHECK(done_event_.IsSignaled());
-      done_event_.Reset();
+      DCHECK(registration->done_event()->IsSignaled());
+      registration->done_event()->Reset();
       installing_worker->web_agent()
           ->context()
           ->message_loop()
@@ -1140,8 +1211,12 @@ void ServiceWorkerJobs::Install(
                           done_event->Signal();
                         },
                         done_event, install_failed);
-                    scoped_refptr<ExtendableEvent> event(new ExtendableEvent(
-                        base::Tokens::install(), std::move(done_callback)));
+                    auto* settings = installing_worker->web_agent()
+                                         ->context()
+                                         ->environment_settings();
+                    scoped_refptr<ExtendableEvent> event(
+                        new ExtendableEvent(settings, base::Tokens::install(),
+                                            std::move(done_callback)));
                     installing_worker->worker_global_scope()->DispatchEvent(
                         event);
                     if (!event->IsActive()) {
@@ -1151,18 +1226,15 @@ void ServiceWorkerJobs::Install(
                       done_event->Signal();
                     }
                   },
-                  base::Unretained(installing_worker), &done_event_,
-                  install_failed));
+                  base::Unretained(installing_worker),
+                  registration->done_event(), install_failed));
       // 11.3.2. Wait for task to have executed or been discarded.
       // This waiting is done inside PostBlockingTask above.
       // 11.3.3. Wait for the step labeled WaitForAsynchronousExtensions to
       //         complete.
-      // TODO(b/240164388): Investigate a better approach for combining waiting
-      // for the ExtendableEvent while also allowing use of algorithms that run
-      // on the same thread from the event handler.
-      while (!done_event_.TimedWait(base::TimeDelta::FromMilliseconds(100))) {
-        base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
-        base::RunLoop().RunUntilIdle();
+      if (!WaitForAsynchronousExtensions(registration)) {
+        // Timeout
+        install_failed->store(true);
       }
     }
   }
@@ -1395,8 +1467,8 @@ void ServiceWorkerJobs::Activate(
                 active_worker->worker_global_scope()
                     ->environment_settings()
                     ->context());
-      DCHECK(done_event_.IsSignaled());
-      done_event_.Reset();
+      DCHECK(registration->done_event()->IsSignaled());
+      registration->done_event()->Reset();
       active_worker->web_agent()
           ->context()
           ->message_loop()
@@ -1410,8 +1482,12 @@ void ServiceWorkerJobs::Activate(
                         base::BindOnce([](base::WaitableEvent* done_event,
                                           bool) { done_event->Signal(); },
                                        done_event);
-                    scoped_refptr<ExtendableEvent> event(new ExtendableEvent(
-                        base::Tokens::activate(), std::move(done_callback)));
+                    auto* settings = active_worker->web_agent()
+                                         ->context()
+                                         ->environment_settings();
+                    scoped_refptr<ExtendableEvent> event(
+                        new ExtendableEvent(settings, base::Tokens::activate(),
+                                            std::move(done_callback)));
                     // 11.1.1.1. Let e be the result of creating an event with
                     //           ExtendableEvent.
                     // 11.1.1.2. Initialize e’s type attribute to activate.
@@ -1426,7 +1502,7 @@ void ServiceWorkerJobs::Activate(
                       done_event->Signal();
                     }
                   },
-                  base::Unretained(active_worker), &done_event_));
+                  base::Unretained(active_worker), registration->done_event()));
       // 11.1.2. Wait for task to have executed or been discarded.
       // This waiting is done inside PostBlockingTask above.
       // 11.1.3. Wait for the step labeled WaitForAsynchronousExtensions to
@@ -1434,10 +1510,12 @@ void ServiceWorkerJobs::Activate(
       // TODO(b/240164388): Investigate a better approach for combining waiting
       // for the ExtendableEvent while also allowing use of algorithms that run
       // on the same thread from the event handler.
-      while (!done_event_.TimedWait(base::TimeDelta::FromMilliseconds(100))) {
-        base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
-        base::RunLoop().RunUntilIdle();
+      if (!WaitForAsynchronousExtensions(registration)) {
+        // Timeout
+        activated = false;
       }
+    } else {
+      activated = false;
     }
   }
   // 12. Run the Update Worker State algorithm passing registration’s active
@@ -1765,7 +1843,8 @@ void ServiceWorkerJobs::HandleServiceWorkerClientUnload(web::Context* client) {
 
   // 5. If registration is unregistered, invoke Try Clear Registration with
   //    registration.
-  if (scope_to_registration_map_->IsUnregistered(registration)) {
+  if (scope_to_registration_map_ &&
+      scope_to_registration_map_->IsUnregistered(registration)) {
     TryClearRegistration(registration);
   }
 
@@ -1843,9 +1922,9 @@ void ServiceWorkerJobs::Unregister(Job* job) {
     // 1.1. Invoke Reject Job Promise with job and "SecurityError" DOMException.
     RejectJobPromise(
         job,
-        PromiseErrorData(
-            web::DOMException::kSecurityErr,
-            "Service Worker Unregister failed: Scope origin does not match."));
+        PromiseErrorData(web::DOMException::kSecurityErr,
+                         ServiceWorkerConsts::
+                             kServiceWorkerUnregisterScopeOriginNotSameError));
 
     // 1.2. Invoke Finish Job with job and abort these steps.
     FinishJob(job);
@@ -2702,6 +2781,7 @@ void ServiceWorkerJobs::ServiceWorkerPostMessageSubSteps(
 
                       event_target->DispatchEvent(
                           new worker::ExtendableMessageEvent(
+                              event_target->environment_settings(),
                               base::Tokens::message(), init_dict,
                               std::move(serialize_result)));
                     },

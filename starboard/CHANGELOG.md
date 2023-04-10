@@ -14,6 +14,11 @@ A description of all changes currently in the experimental Starboard version
 can be found in the comments of the "Experimental Feature Defines" section of
 [configuration.h](configuration.h).
 
+### Removed version suffixes of SbPlayer functions and structures
+Renamed SbPlayerInfo2 to SbPlayerInfo, SbPlayerSeek2() to SbPlayerSeek(),and
+SbPlayerGetInfo2() to SbPlayerGetInfo(), as the version suffixes are no longer
+necessary.
+
 ### Cobalt extensions are now Starboard extensions
 Previously named Cobalt extensions are now found under `starboard/extensions`.
 The mechanism extends platform-specific functionality of Starboard via runtime
@@ -22,6 +27,37 @@ This also helps break the dependency cycle between Starboard and Cobalt for
 cleaner component layering.
 For existing uses in Starboard ports, fallback forwarding headers are provided
 in the previous location of the code in `cobalt/extensions`.
+
+### Refined SbMediaAudioSampleInfo and SbMediaVideoSampleInfo
+Moved attributes of `SbMediaAudioSampleInfo` and `SbMedidaVideoSampleInfo` that
+specific to the stream (i.e. don't change per access unit) to
+`SbMediaAudioStreamInfo` and `SbMediaVideoStreamInfo`.
+
+### Add duration discard support to SbMediaAudioSampleInfo
+This allows to discard specific durations from the front and the back of any
+audio access units to improve the accuracy of audio playback.  For example, in
+an AAC stream where each access unit contains 1024 frames, this allows to
+discard the last 300 frames of the 1024 frames when the duration of the stream
+isn't aligned to 1024 frames.
+
+### Renamed SbPlayerWriteSample2() to SbPlayerWriteSamples()
+To better reflect the fact that it may write multiple samples in one call.
+
+### Add IAMF value to SbMediaAudioCodec.
+This makes it possible to support IAMF in the future.
+
+### Added SB_MODULAR_BUILD for supporting modular builds
+This configuration is set for modular builds, which have:
+  1. Application binary built as a shared library.
+  2. Either of a) or b)
+        a. Starboard built at a shared library and a separate loader_app executable.
+        b. A loader_app executable with Starboard built in ( Evergreen ).
+
+### Split C++ and C code from `starboard/atomic.h`
+`starboard/atomic.h` previously included C++ wrapper code for atomic operations.
+This code has been separated out and refactored into `starboard/common/atomic.h`
+to break dependency cycle between Starboard interface and Starboard Common C++
+library.
 
 ## Version 14
 ### Add MP3, FLAC, and PCM values to SbMediaAudioCodec.

@@ -16,10 +16,12 @@
 
 #include "starboard/configuration.h"
 #include "starboard/contrib/stadia/x11/application_stadia_x11.h"
+#include "starboard/event.h"
 #include "starboard/shared/signal/crash_signals.h"
 #include "starboard/shared/signal/suspend_signals.h"
 #include "starboard/shared/starboard/link_receiver.h"
 #if SB_IS(EVERGREEN_COMPATIBLE)
+#include "starboard/common/paths.h"
 #include "starboard/shared/starboard/command_line.h"
 #include "starboard/shared/starboard/starboard_switches.h"
 #endif
@@ -32,13 +34,21 @@ extern "C" SB_EXPORT_PLATFORM int main(int argc, char** argv) {
   starboard::shared::signal::InstallSuspendSignalHandlers();
 
 #if SB_IS(EVERGREEN_COMPATIBLE)
+  std::string ca_certificates_path = starboard::common::GetCACertificatesPath();
+  if (ca_certificates_path.empty()) {
+    SB_LOG(ERROR) << "Failed to get CA certificates path";
+    return 1;
+  }
+
   if (starboard::shared::starboard::CommandLine(argc, argv)
           .HasSwitch(starboard::shared::starboard::kStartHandlerAtLaunch) &&
       !starboard::shared::starboard::CommandLine(argc, argv)
            .HasSwitch(starboard::shared::starboard::kStartHandlerAtCrash)) {
-    third_party::crashpad::wrapper::InstallCrashpadHandler(false);
+    third_party::crashpad::wrapper::InstallCrashpadHandler(
+        false, ca_certificates_path);
   } else {
-    third_party::crashpad::wrapper::InstallCrashpadHandler(true);
+    third_party::crashpad::wrapper::InstallCrashpadHandler(
+        true, ca_certificates_path);
   }
 #endif
 
@@ -48,6 +58,9 @@ extern "C" SB_EXPORT_PLATFORM int main(int argc, char** argv) {
   SbLogRawDumpStack(3);
 #endif
 
+#if SB_MODULAR_BUILD
+  return SbRunStarboardMain(argc, argv, SbEventHandle);
+#else
   starboard::contrib::stadia::x11::ApplicationStadiaX11 application;
   int result = 0;
   {
@@ -57,4 +70,19 @@ extern "C" SB_EXPORT_PLATFORM int main(int argc, char** argv) {
   starboard::shared::signal::UninstallSuspendSignalHandlers();
   starboard::shared::signal::UninstallCrashSignalHandlers();
   return result;
+#endif  // SB_MODULAR_BUILD
 }
+
+#if SB_MODULAR_BUILD
+int SbRunStarboardMain(int argc, char** argv, SbEventHandleCallback callback) {
+  starboard::contrib::stadia::x11::ApplicationStadiaX11 application(callback);
+  int result = 0;
+  {
+    starboard::shared::starboard::LinkReceiver receiver(&application);
+    result = application.Run(argc, argv);
+  }
+  starboard::shared::signal::UninstallSuspendSignalHandlers();
+  starboard::shared::signal::UninstallCrashSignalHandlers();
+  return result;
+}
+#endif  // SB_MODULAR_BUILD

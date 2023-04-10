@@ -16,15 +16,6 @@ import("//build/config/clang/clang.gni")
 import("//build/toolchain/gcc_toolchain.gni")
 import("//starboard/android/shared/toolchain/toolchain.gni")
 
-clang_toolchain("host") {
-  clang_base_path = clang_base_path
-
-  toolchain_args = {
-    current_os = "linux"
-    current_cpu = "x86"
-  }
-}
-
 gcc_toolchain("target") {
   prefix = rebase_path("$android_toolchain_path/bin", root_build_dir)
   cc = "$prefix/armv7a-linux-androideabi${android_ndk_api_level}-clang"
@@ -35,6 +26,22 @@ gcc_toolchain("target") {
   nm = "$prefix/arm-linux-androideabi-nm"
 
   toolchain_args = {
+    is_clang = true
+  }
+}
+
+gcc_toolchain("native_target") {
+  prefix = rebase_path("$android_toolchain_path/bin", root_build_dir)
+  cc = "$prefix/armv7a-linux-androideabi${android_ndk_api_level}-clang"
+  cxx = "$prefix/armv7a-linux-androideabi${android_ndk_api_level}-clang++"
+  ld = cxx
+  ar = "$prefix/arm-linux-androideabi-readelf"
+  ar = "$prefix/arm-linux-androideabi-ar"
+  nm = "$prefix/arm-linux-androideabi-nm"
+
+  toolchain_args = {
+    is_starboard = false
+    is_native_target_build = true
     is_clang = true
   }
 }

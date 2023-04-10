@@ -44,7 +44,11 @@ void Dispatch(SbEventType type, void* data, SbEventDataDestructor destructor) {
   SbEvent event;
   event.type = type;
   event.data = data;
+#if SB_MODULAR_BUILD
+  Application::Get()->sb_event_handle_callback_(&event);
+#else
   SbEventHandle(&event);
+#endif  // SB_MODULAR_BUILD
   if (destructor) {
     destructor(event.data);
   }
@@ -65,11 +69,22 @@ volatile SbAtomic32 g_next_event_id = 0;
 
 Application* Application::g_instance = NULL;
 
+#if SB_MODULAR_BUILD
+Application::Application(SbEventHandleCallback sb_event_handle_callback)
+    : error_level_(0),
+      thread_(SbThreadGetCurrent()),
+      start_link_(NULL),
+      state_(kStateUnstarted),
+      sb_event_handle_callback_(sb_event_handle_callback) {
+  SB_CHECK(sb_event_handle_callback_)
+      << "sb_event_handle_callback_ has not been set.";
+#else
 Application::Application()
     : error_level_(0),
       thread_(SbThreadGetCurrent()),
       start_link_(NULL),
       state_(kStateUnstarted) {
+#endif  // SB_MODULAR_BUILD
   Application* old_instance =
       reinterpret_cast<Application*>(SbAtomicAcquire_CompareAndSwapPtr(
           reinterpret_cast<SbAtomicPtr*>(&g_instance),
@@ -274,10 +289,10 @@ bool Application::DispatchAndDelete(Application::Event* event) {
   // Ensure the event is deleted unless it is released.
   scoped_ptr<Event> scoped_event(event);
 
-// Ensure that we go through the the appropriate lifecycle events based on
-// the current state. If intermediate events need to be processed, use
-// HandleEventAndUpdateState() rather than Inject() for the intermediate events
-// because there may already be other lifecycle events in the queue.
+  // Ensure that we go through the the appropriate lifecycle events based on
+  // the current state. If intermediate events need to be processed, use
+  // HandleEventAndUpdateState() rather than Inject() for the intermediate
+  // events because there may already be other lifecycle events in the queue.
 
 #if SB_API_VERSION >= 13
   SbTimeMonotonic timestamp = scoped_event->event->timestamp;
@@ -539,7 +554,11 @@ bool Application::HandleEventAndUpdateState(Application::Event* event) {
 // OnSuspend() is called after SbEventHandle(kSbEventTypeSuspend).
 #endif  // SB_API_VERSION >= 13
 
+#if SB_MODULAR_BUILD
+  sb_event_handle_callback_(scoped_event->event);
+#else
   SbEventHandle(scoped_event->event);
+#endif  // SB_MODULAR_BUILD
 
 #if SB_API_VERSION >= 13
   switch (scoped_event->event->type) {
@@ -650,7 +669,7 @@ Application::Event* Application::CreateInitialEvent(SbEventType type) {
 
 #if SB_API_VERSION >= 13
   return new Event(type, timestamp, start_data, &DeleteStartData);
-#else  // SB_API_VERSION >= 13
+#else   // SB_API_VERSION >= 13
   return new Event(type, start_data, &DeleteStartData);
 #endif  // SB_API_VERSION >= 13
 }

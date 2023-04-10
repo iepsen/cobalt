@@ -253,8 +253,6 @@ static_library("starboard_platform") {
     "//starboard/shared/starboard/media/media_get_buffer_storage_type.cc",
     "//starboard/shared/starboard/media/media_get_progressive_buffer_budget.cc",
     "//starboard/shared/starboard/media/media_is_buffer_using_memory_pool.cc",
-    "//starboard/shared/starboard/media/mime_type.cc",
-    "//starboard/shared/starboard/media/mime_type.h",
     "//starboard/shared/starboard/memory.cc",
     "//starboard/shared/starboard/microphone/microphone_close.cc",
     "//starboard/shared/starboard/microphone/microphone_create.cc",
@@ -369,6 +367,8 @@ static_library("starboard_platform") {
     "log_is_tty.cc",
     "log_raw.cc",
     "main.cc",
+    "max_output_buffers_lookup_table.cc",
+    "max_output_buffers_lookup_table.h",
     "media_capabilities_cache.cc",
     "media_capabilities_cache.h",
     "media_codec_bridge.cc",
@@ -489,11 +489,23 @@ static_library("starboard_platform") {
   }
 
   if (sb_is_evergreen_compatible) {
-    public_deps += [ "//starboard/elf_loader:evergreen_config" ]
+    sources -= [
+      "crash_handler.cc",
+      "crash_handler.h",
+    ]
+    sources += [
+      "//starboard/shared/starboard/crash_handler.cc",
+      "//starboard/shared/starboard/crash_handler.h",
+      "//starboard/shared/starboard/starboard_switches.cc",
+      "//starboard/shared/starboard/starboard_switches.h",
+    ]
 
-    if (!sb_evergreen_compatible_enable_lite) {
-      public_deps += [ "//starboard/loader_app:pending_restart" ]
-    }
+    public_deps += [
+      "//starboard/elf_loader:evergreen_config",
+      "//starboard/loader_app:pending_restart",
+    ]
+
+    deps += [ "//third_party/crashpad/wrapper" ]
   }
 
   if (sb_evergreen_compatible_use_libunwind) {

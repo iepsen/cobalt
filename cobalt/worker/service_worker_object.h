@@ -30,7 +30,7 @@
 #include "cobalt/web/web_settings.h"
 #include "cobalt/worker/service_worker_state.h"
 #include "cobalt/worker/worker_global_scope.h"
-#include "starboard/atomic.h"
+#include "starboard/common/atomic.h"
 #include "url/gurl.h"
 
 #if defined(ENABLE_DEBUGGER)
@@ -70,6 +70,7 @@ class ServiceWorkerObject
 
     std::string name;
     web::Agent::Options web_options;
+    web::WindowOrWorkerGlobalScope::Options global_scope_options;
     ServiceWorkerRegistrationObject* containing_service_worker_registration;
   };
 
@@ -101,7 +102,7 @@ class ServiceWorkerObject
   void AppendToSetOfUsedScripts(const GURL& url) {
     set_of_used_scripts_.insert(url);
   }
-  std::set<GURL> set_of_used_scripts() { return set_of_used_scripts_; }
+  std::set<GURL>& set_of_used_scripts() { return set_of_used_scripts_; }
 
   // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#dfn-script-resource-map
   void set_script_resource_map(ScriptResourceMap&& resource_map) {
@@ -110,6 +111,7 @@ class ServiceWorkerObject
   void SetScriptResource(const GURL& url, std::string* resource);
   bool HasScriptResource() const;
   const ScriptResource* LookupScriptResource(const GURL& url) const;
+  void SetScriptResourceHasEverBeenEvaluated(const GURL& url);
 
   // Steps 13-15 of Algorithm for Install.
   //   https://www.w3.org/TR/2022/CRD-service-workers-20220712/#installation-algorithm
@@ -145,6 +147,10 @@ class ServiceWorkerObject
   bool ShouldSkipEvent(base::Token event_name);
 
   std::string options_name() { return options_.name; }
+
+  std::set<base::Token>& set_of_event_types_to_handle() {
+    return set_of_event_types_to_handle_;
+  }
 
  private:
   // Called by ObtainWebAgentAndWaitUntilDone to perform initialization required
@@ -193,6 +199,9 @@ class ServiceWorkerObject
   starboard::atomic_bool start_failed_;
 
   scoped_refptr<WorkerGlobalScope> worker_global_scope_;
+
+  // https://www.w3.org/TR/2022/CRD-service-workers-20220712/#dfn-set-of-event-types-to-handle
+  std::set<base::Token> set_of_event_types_to_handle_;
 };
 
 }  // namespace worker

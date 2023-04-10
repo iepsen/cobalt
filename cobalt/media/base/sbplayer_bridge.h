@@ -24,6 +24,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
+#include "cobalt/media/base/cval_stats.h"
 #include "cobalt/media/base/decode_target_provider.h"
 #include "cobalt/media/base/decoder_buffer_cache.h"
 #include "cobalt/media/base/sbplayer_interface.h"
@@ -74,7 +75,8 @@ class SbPlayerBridge {
                  bool allow_resume_after_suspend, bool prefer_decode_to_texture,
                  const OnEncryptedMediaInitDataEncounteredCB&
                      encrypted_media_init_data_encountered_cb,
-                 DecodeTargetProvider* const decode_target_provider);
+                 DecodeTargetProvider* const decode_target_provider,
+                 std::string pipeline_identifier);
 #endif  // SB_HAS(PLAYER_WITH_URL)
   // Create a SbPlayerBridge with normal player
   SbPlayerBridge(SbPlayerInterface* interface,
@@ -89,7 +91,8 @@ class SbPlayerBridge {
                  SbPlayerSetBoundsHelper* set_bounds_helper,
                  bool allow_resume_after_suspend, bool prefer_decode_to_texture,
                  DecodeTargetProvider* const decode_target_provider,
-                 const std::string& max_video_capabilities);
+                 const std::string& max_video_capabilities,
+                 std::string pipeline_identifier);
 
   ~SbPlayerBridge();
 
@@ -195,9 +198,13 @@ class SbPlayerBridge {
 
   void WriteNextBuffersFromCache(DemuxerStream::Type type,
                                  int max_buffers_per_write);
+
+  template <typename PlayerSampleInfo>
   void WriteBuffersInternal(
       DemuxerStream::Type type,
-      const std::vector<scoped_refptr<DecoderBuffer>>& buffers);
+      const std::vector<scoped_refptr<DecoderBuffer>>& buffers,
+      const SbMediaAudioStreamInfo* audio_stream_info,
+      const SbMediaVideoStreamInfo* video_stream_info);
 
   void GetInfo_Locked(uint32* video_frames_decoded,
                       uint32* video_frames_dropped,
@@ -253,8 +260,10 @@ class SbPlayerBridge {
   // |task_runner_|.
   AudioDecoderConfig audio_config_;
   VideoDecoderConfig video_config_;
-  SbMediaAudioSampleInfo audio_sample_info_ = {};
-  SbMediaVideoSampleInfo video_sample_info_ = {};
+  // TODO(b/268098991): Replace them with AudioStreamInfo and VideoStreamInfo
+  //                    wrapper classes.
+  SbMediaAudioStreamInfo audio_stream_info_ = {};
+  SbMediaVideoStreamInfo video_stream_info_ = {};
   DecodingBuffers decoding_buffers_;
   int ticket_ = SB_PLAYER_INITIAL_TICKET;
   float volume_ = 1.0f;
@@ -307,6 +316,9 @@ class SbPlayerBridge {
   // Used for Gathered Sample Write.
   bool pending_audio_eos_buffer_ = false;
   bool pending_video_eos_buffer_ = false;
+
+  CValStats* cval_stats_;
+  std::string pipeline_identifier_;
 };
 
 }  // namespace media

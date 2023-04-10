@@ -23,13 +23,12 @@
 
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/trace_event/trace_event.h"
 #include "cobalt/script/exception_message.h"
 #include "cobalt/script/promise.h"
 #include "cobalt/script/script_value.h"
-#include "cobalt/web/context.h"
-#include "cobalt/web/environment_settings.h"
 #include "cobalt/worker/service_worker_jobs.h"
 #include "cobalt/worker/service_worker_registration_object.h"
 #include "cobalt/worker/service_worker_update_via_cache.h"
@@ -44,12 +43,14 @@ namespace {
 
 // Returns the serialized URL excluding the fragment.
 std::string SerializeExcludingFragment(const GURL& url) {
-  url::Replacements<char> replacements;
+  GURL::Replacements replacements;
+  replacements.ClearUsername();
+  replacements.ClearPassword();
+  replacements.ClearQuery();
   replacements.ClearRef();
-  GURL no_fragment_url = url.ReplaceComponents(replacements);
-  DCHECK(!no_fragment_url.has_ref() || no_fragment_url.ref().empty());
-  DCHECK(!no_fragment_url.is_empty());
-  return no_fragment_url.spec();
+  return base::TrimString(url.ReplaceComponents(replacements).spec(), "/",
+                          base::TrimPositions::TRIM_TRAILING)
+      .as_string();
 }
 
 }  // namespace
@@ -239,6 +240,7 @@ bool ServiceWorkerRegistrationMap::IsUnregistered(
   // is not this service worker registration.
   //   https://www.w3.org/TR/2022/CRD-service-workers-20220712/#dfn-service-worker-registration-unregistered
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (!registration) return true;
   std::string scope_string =
       SerializeExcludingFragment(registration->scope_url());
   RegistrationMapKey registration_key(registration->storage_key(),

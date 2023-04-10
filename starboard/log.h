@@ -47,7 +47,8 @@ typedef enum SbLogPriority {
 //   that passing |kSbLogPriorityFatal| does not terminate the program. Such a
 //   policy must be enforced at the application level. In fact, |priority| may
 //   be completely ignored on many platforms.
-// |message|: The message to be logged. No formatting is required to be done
+// |message|: The message to be logged. Must not be NULL. No formatting is
+// required to be done
 //   on the value, including newline termination. That said, platforms can
 //   adjust the message to be more suitable for their output method by
 //   wrapping the text, stripping unprintable characters, etc.
@@ -57,7 +58,7 @@ SB_EXPORT void SbLog(SbLogPriority priority, const char* message);
 // from an asynchronous signal handler (e.g. a |SIGSEGV| handler). It should not
 // do any additional formatting.
 //
-// |message|: The message to be logged.
+// |message|: The message to be logged. Must not be NULL.
 SB_EXPORT void SbLogRaw(const char* message);
 
 // Dumps the stack of the current thread to the log in an async-signal-safe
@@ -79,7 +80,7 @@ SB_EXPORT void SbLogRawFormat(const char* format, va_list args)
 // Inline wrapper of SbLogFormat to convert from ellipsis to va_args.
 static SB_C_INLINE void SbLogRawFormatF(const char* format, ...)
     SB_PRINTF_FORMAT(1, 2);
-void SbLogRawFormatF(const char* format, ...) {
+static SB_C_INLINE void SbLogRawFormatF(const char* format, ...) {
   va_list args;
   va_start(args, format);
   SbLogRawFormat(format, args);
@@ -94,7 +95,7 @@ SB_EXPORT void SbLogFormat(const char* format, va_list args)
 // Inline wrapper of SbLogFormat that converts from ellipsis to va_args.
 static SB_C_INLINE void SbLogFormatF(const char* format, ...)
     SB_PRINTF_FORMAT(1, 2);
-void SbLogFormatF(const char* format, ...) {
+static SB_C_INLINE void SbLogFormatF(const char* format, ...) {
   va_list args;
   va_start(args, format);
   SbLogFormat(format, args);

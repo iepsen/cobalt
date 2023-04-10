@@ -123,6 +123,9 @@ class Window : public web::WindowOrWorkerGlobalScope,
   typedef base::Callback<void(const std::string&,
                               const base::Optional<std::string>&)>
       CacheCallback;
+  typedef base::Callback<void(
+      const scoped_refptr<ui_navigation::NavItem>& nav_item)>
+      NavItemCallback;
 
   enum ClockType {
     kClockTypeTestRunner,
@@ -154,10 +157,7 @@ class Window : public web::WindowOrWorkerGlobalScope,
       const base::Callback<void(const GURL&)> navigation_callback,
       const loader::Decoder::OnCompleteFunction& load_complete_callback,
       network_bridge::CookieJar* cookie_jar,
-      const network_bridge::PostSender& post_sender,
-      csp::CSPHeaderPolicy require_csp,
-      web::CspEnforcementType csp_enforcement_mode,
-      const base::Closure& csp_policy_changed_callback,
+      const web::CspDelegate::Options& csp_options,
       const base::Closure& ran_animation_frame_callbacks_callback,
       CloseCallback window_close_callback,
       base::Closure window_minimize_callback,
@@ -168,6 +168,7 @@ class Window : public web::WindowOrWorkerGlobalScope,
       const OnStopDispatchEventCallback& stop_tracking_dispatch_event_callback,
       const ScreenshotManager::ProvideScreenshotFunctionCallback&
           screenshot_function_callback,
+      const NavItemCallback& cancel_scroll_callback,
       base::WaitableEvent* synchronous_loader_interrupt,
       bool enable_inline_script_warnings = false,
       const scoped_refptr<ui_navigation::NavItem>& ui_nav_root = nullptr,
@@ -203,7 +204,8 @@ class Window : public web::WindowOrWorkerGlobalScope,
 
   const scoped_refptr<Navigator>& navigator() const;
 
-  script::Handle<ScreenshotManager::InterfacePromise> Screenshot();
+  script::Handle<ScreenshotManager::InterfacePromise> Screenshot(
+      script::EnvironmentSettings* environment_settings);
 
   // Web API: CSSOM (partial interface)
   // Returns the computed style of the given element, as described in
@@ -338,11 +340,6 @@ class Window : public web::WindowOrWorkerGlobalScope,
   void SetApplicationState(base::ApplicationState state,
                            SbTimeMonotonic timestamp);
 
-  // Performs the steps specified for runtime script errors:
-  //   https://www.w3.org/TR/html50/webappapis.html#runtime-script-errors
-  // Returns whether or not the script was handled.
-  bool ReportScriptError(const script::ErrorReport& error_report);
-
   // ApplicationLifecycleState::Observer implementation.
   void OnWindowFocusChanged(bool has_focus) override;
   void OnVisibilityStateChanged(VisibilityState visibility_state) override;
@@ -358,6 +355,8 @@ class Window : public web::WindowOrWorkerGlobalScope,
   // Cache the passed in splash screen content for the window.location URL.
   void CacheSplashScreen(const std::string& content,
                          const base::Optional<std::string>& topic);
+
+  void CancelScroll(const scoped_refptr<ui_navigation::NavItem>& nav_item);
 
   // Custom on screen keyboard.
   const scoped_refptr<OnScreenKeyboard>& on_screen_keyboard() const;
@@ -410,11 +409,6 @@ class Window : public web::WindowOrWorkerGlobalScope,
   // visibility state changes to visible.
   bool is_resize_event_pending_;
 
-  // Whether or not the window is currently reporting a script error. This is
-  // used to prevent infinite recursion, because reporting the error causes an
-  // event to be dispatched, which can generate a new script error.
-  bool is_reporting_script_error_;
-
 #if defined(ENABLE_TEST_RUNNER)
   scoped_refptr<TestRunner> test_runner_;
 #endif  // ENABLE_TEST_RUNNER
@@ -444,6 +438,8 @@ class Window : public web::WindowOrWorkerGlobalScope,
   scoped_refptr<OnScreenKeyboard> on_screen_keyboard_;
 
   CacheCallback splash_screen_cache_callback_;
+
+  NavItemCallback cancel_scroll_callback_;
 
   OnStartDispatchEventCallback on_start_dispatch_event_callback_;
   OnStopDispatchEventCallback on_stop_dispatch_event_callback_;

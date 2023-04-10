@@ -609,6 +609,10 @@ const char* GetMediaAudioCodecName(SbMediaAudioCodec codec) {
     case kSbMediaAudioCodecPcm:
       return "pcm";
 #endif  // SB_API_VERSION >= 14
+#if SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
+    case kSbMediaAudioCodecIamf:
+      return "iamf";
+#endif  // SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
   }
   SB_NOTREACHED();
   return "invalid";
@@ -784,6 +788,29 @@ const char* GetMediaRangeIdName(SbMediaRangeId range_id) {
   return "Invalid";
 }
 
+const char* GetMediaAudioSampleTypeName(SbMediaAudioSampleType sample_type) {
+  switch (sample_type) {
+    case kSbMediaAudioSampleTypeFloat32:
+      return "float32";
+    case kSbMediaAudioSampleTypeInt16Deprecated:
+      return "int16";
+  }
+  SB_NOTREACHED();
+  return "Invalid";
+}
+
+const char* GetMediaAudioStorageTypeName(
+    SbMediaAudioFrameStorageType storage_type) {
+  switch (storage_type) {
+    case kSbMediaAudioFrameStorageTypeInterleaved:
+      return "interleaved";
+    case kSbMediaAudioFrameStorageTypePlanar:
+      return "planar";
+  }
+  SB_NOTREACHED();
+  return "Invalid";
+}
+
 bool ParseVideoCodec(const char* codec_string,
                      SbMediaVideoCodec* codec,
                      int* profile,
@@ -859,10 +886,10 @@ std::ostream& operator<<(std::ostream& os,
 
 std::ostream& operator<<(std::ostream& os,
                          const SbMediaColorMetadata& metadata) {
-  using starboard::GetMediaPrimaryIdName;
-  using starboard::GetMediaTransferIdName;
   using starboard::GetMediaMatrixIdName;
+  using starboard::GetMediaPrimaryIdName;
   using starboard::GetMediaRangeIdName;
+  using starboard::GetMediaTransferIdName;
 
   os << metadata.bits_per_channel
      << " bits, mastering metadata: " << metadata.mastering_metadata
@@ -886,14 +913,20 @@ std::ostream& operator<<(std::ostream& os,
                          const SbMediaVideoSampleInfo& sample_info) {
   using starboard::GetMediaVideoCodecName;
 
-  if (sample_info.codec == kSbMediaVideoCodecNone) {
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  const SbMediaVideoStreamInfo& stream_info = sample_info.stream_info;
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  const SbMediaVideoSampleInfo& stream_info = sample_info;
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+
+  if (stream_info.codec == kSbMediaVideoCodecNone) {
     return os;
   }
 
-  os << "codec: " << GetMediaVideoCodecName(sample_info.codec) << ", ";
-  os << "mime: " << (sample_info.mime ? sample_info.mime : "<null>")
+  os << "codec: " << GetMediaVideoCodecName(stream_info.codec) << ", ";
+  os << "mime: " << (stream_info.mime ? stream_info.mime : "<null>")
      << ", max video capabilities: "
-     << (sample_info.max_video_capabilities ? sample_info.max_video_capabilities
+     << (stream_info.max_video_capabilities ? stream_info.max_video_capabilities
                                             : "<null>")
      << ", ";
 
@@ -901,8 +934,8 @@ std::ostream& operator<<(std::ostream& os,
     os << "key frame, ";
   }
 
-  os << sample_info.frame_width << 'x' << sample_info.frame_height << ' ';
-  os << '(' << sample_info.color_metadata << ')';
+  os << stream_info.frame_width << 'x' << stream_info.frame_height << ' ';
+  os << '(' << stream_info.color_metadata << ')';
 
   return os;
 }
@@ -912,22 +945,77 @@ std::ostream& operator<<(std::ostream& os,
   using starboard::GetMediaAudioCodecName;
   using starboard::HexEncode;
 
-  if (sample_info.codec == kSbMediaAudioCodecNone) {
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  const SbMediaAudioStreamInfo& stream_info = sample_info.stream_info;
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  const SbMediaAudioSampleInfo& stream_info = sample_info;
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+
+  if (stream_info.codec == kSbMediaAudioCodecNone) {
     return os;
   }
 
-  os << "codec: " << GetMediaAudioCodecName(sample_info.codec) << ", ";
-  os << "mime: " << (sample_info.mime ? sample_info.mime : "<null>");
-  os << "channels: " << sample_info.number_of_channels
-     << ", sample rate: " << sample_info.samples_per_second
-     << ", config: " << sample_info.audio_specific_config_size << " bytes, "
+  os << "codec: " << GetMediaAudioCodecName(stream_info.codec) << ", ";
+  os << "mime: " << (stream_info.mime ? stream_info.mime : "<null>");
+  os << "channels: " << stream_info.number_of_channels
+     << ", sample rate: " << stream_info.samples_per_second
+     << ", config: " << stream_info.audio_specific_config_size << " bytes, "
      << "["
      << HexEncode(
-            sample_info.audio_specific_config,
-            std::min(static_cast<int>(sample_info.audio_specific_config_size),
+            stream_info.audio_specific_config,
+            std::min(static_cast<int>(stream_info.audio_specific_config_size),
                      16),
             " ")
-     << (sample_info.audio_specific_config_size > 16 ? " ...]" : " ]");
+     << (stream_info.audio_specific_config_size > 16 ? " ...]" : " ]");
 
   return os;
 }
+
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+std::ostream& operator<<(std::ostream& os,
+                         const SbMediaVideoStreamInfo& stream_info) {
+  using starboard::GetMediaVideoCodecName;
+
+  if (stream_info.codec == kSbMediaVideoCodecNone) {
+    return os;
+  }
+
+  os << "codec: " << GetMediaVideoCodecName(stream_info.codec) << ", ";
+  os << "mime: " << (stream_info.mime ? stream_info.mime : "<null>")
+     << ", max video capabilities: "
+     << (stream_info.max_video_capabilities ? stream_info.max_video_capabilities
+                                            : "<null>")
+     << ", ";
+
+  os << stream_info.frame_width << 'x' << stream_info.frame_height << ' ';
+  os << '(' << stream_info.color_metadata << ')';
+
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         const SbMediaAudioStreamInfo& stream_info) {
+  using starboard::GetMediaAudioCodecName;
+  using starboard::HexEncode;
+
+  if (stream_info.codec == kSbMediaAudioCodecNone) {
+    return os;
+  }
+
+  os << "codec: " << GetMediaAudioCodecName(stream_info.codec) << ", ";
+  os << "mime: " << (stream_info.mime ? stream_info.mime : "<null>");
+  os << "channels: " << stream_info.number_of_channels
+     << ", sample rate: " << stream_info.samples_per_second
+     << ", config: " << stream_info.audio_specific_config_size << " bytes, "
+     << "["
+     << HexEncode(
+            stream_info.audio_specific_config,
+            std::min(static_cast<int>(stream_info.audio_specific_config_size),
+                     16),
+            " ")
+     << (stream_info.audio_specific_config_size > 16 ? " ...]" : " ]");
+
+  return os;
+}
+
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION

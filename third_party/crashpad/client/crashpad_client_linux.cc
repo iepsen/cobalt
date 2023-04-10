@@ -26,7 +26,9 @@
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "client/client_argv_handling.h"
+#ifdef STARBOARD
 #include "starboard/common/mutex.h"
+#endif
 #include "third_party/lss/lss.h"
 #include "util/file/file_io.h"
 #include "util/file/filesystem.h"
@@ -95,7 +97,7 @@ void AddAnnotation(std::vector<std::string>& argv_strings,
 }
 #endif
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) && !defined(STARBOARD)
 
 std::vector<std::string> BuildAppProcessArgs(
     const std::string& class_name,
@@ -163,7 +165,7 @@ std::vector<std::string> BuildArgsToLaunchWithLinker(
   return argv;
 }
 
-#endif  // OS_ANDROID
+#endif  // defined(OS_ANDROID) && !defined(STARBOARD)
 
 // A base class for Crashpad signal handler implementations.
 class SignalHandler {
@@ -565,6 +567,9 @@ bool CrashpadClient::StartHandler(
     const base::FilePath& database,
     const base::FilePath& metrics_dir,
     const std::string& url,
+#if defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
+    const std::string& ca_certificates_path,
+#endif  // defined(STARBOARD) || defined(NATIVE_TARGET_BUILD)
     const std::map<std::string, std::string>& annotations,
     const std::vector<std::string>& arguments,
     bool restartable,
@@ -578,7 +583,15 @@ bool CrashpadClient::StartHandler(
   }
 
   std::vector<std::string> argv = BuildHandlerArgvStrings(
-      handler, database, metrics_dir, url, annotations, arguments);
+      handler,
+      database,
+      metrics_dir,
+      url,
+#if defined(STARBOARD)
+      ca_certificates_path,
+#endif  // STARBOARD
+      annotations,
+      arguments);
 
   argv.push_back(FormatArgumentInt("initial-client-fd", handler_sock.get()));
   argv.push_back("--shared-client-connection");
@@ -609,7 +622,7 @@ bool CrashpadClient::SetHandlerSocket(ScopedFileHandle sock, pid_t pid) {
 }
 #endif  // OS_ANDROID || OS_LINUX
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) && !defined(STARBOARD)
 
 bool CrashpadClient::StartJavaHandlerAtCrash(
     const std::string& class_name,
@@ -695,22 +708,34 @@ bool CrashpadClient::StartHandlerWithLinkerForClient(
   return DoubleForkAndExec(argv, env, socket, false, nullptr);
 }
 
-#endif
+#endif  // defined(OS_ANDROID) && !defined(STARBOARD)
 
 bool CrashpadClient::StartHandlerAtCrash(
     const base::FilePath& handler,
     const base::FilePath& database,
     const base::FilePath& metrics_dir,
     const std::string& url,
+#if defined(STARBOARD)
+    const std::string& ca_certificates_path,
+#endif  // STARBOARD
     const std::map<std::string, std::string>& annotations,
     const std::vector<std::string>& arguments) {
   std::vector<std::string> argv = BuildHandlerArgvStrings(
-      handler, database, metrics_dir, url, annotations, arguments);
+      handler,
+      database,
+      metrics_dir,
+      url,
+#if defined(STARBOARD)
+      ca_certificates_path,
+#endif  // STARBOARD
+      annotations,
+      arguments);
 
   auto signal_handler = LaunchAtCrashHandler::Get();
   return signal_handler->Initialize(&argv, nullptr, &unhandled_signals_);
 }
 
+#if !defined(STARBOARD)
 // static
 bool CrashpadClient::StartHandlerForClient(
     const base::FilePath& handler,
@@ -727,6 +752,7 @@ bool CrashpadClient::StartHandlerForClient(
 
   return DoubleForkAndExec(argv, nullptr, socket, true, nullptr);
 }
+#endif  // !defined(STARBOARD)
 
 #if defined(STARBOARD)
 // static

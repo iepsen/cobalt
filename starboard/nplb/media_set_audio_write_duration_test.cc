@@ -30,8 +30,8 @@ namespace starboard {
 namespace nplb {
 namespace {
 
-using ::starboard::testing::FakeGraphicsContextProvider;
 using ::shared::starboard::player::video_dmp::VideoDmpReader;
+using ::starboard::testing::FakeGraphicsContextProvider;
 using ::testing::ValuesIn;
 
 const SbTime kDuration = kSbTimeSecond / 2;
@@ -57,23 +57,17 @@ class SbMediaSetAudioWriteDurationTest
     }
 
     // Check if we're about to input too far beyond the current playback time.
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+    SbPlayerInfo info;
+    SbPlayerGetInfo(pending_decoder_status_->player, &info);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
     SbPlayerInfo2 info;
     SbPlayerGetInfo2(pending_decoder_status_->player, &info);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
     if ((last_input_timestamp_ - info.current_media_timestamp) > kDuration) {
       // Postpone writing samples.
       return;
     }
-
-    SbPlayerSampleInfo player_sample_info =
-        dmp_reader_.GetPlayerSampleInfo(kSbMediaTypeAudio, index_++);
-
-    SbPlayerSampleInfo sample_info = {};
-    sample_info.buffer = player_sample_info.buffer;
-    sample_info.buffer_size = player_sample_info.buffer_size;
-    sample_info.timestamp = player_sample_info.timestamp;
-    sample_info.drm_info = NULL;
-    sample_info.type = kSbMediaTypeAudio;
-    sample_info.audio_sample_info = dmp_reader_.audio_sample_info();
 
     SbPlayer player = pending_decoder_status_->player;
     SbMediaType type = pending_decoder_status_->type;
@@ -83,7 +77,10 @@ class SbMediaSetAudioWriteDurationTest
       pending_decoder_status_ = nullopt;
     }
 
-    SbPlayerWriteSample2(player, kSbMediaTypeAudio, &sample_info, 1);
+    CallSbPlayerWriteSamples(player, kSbMediaTypeAudio, dmp_reader_.get(),
+                             index_, 1);
+    ++index_;
+
     last_input_timestamp_ = player_sample_info.timestamp;
   }
 
@@ -191,19 +188,30 @@ TEST_P(SbMediaSetAudioWriteDurationTest, WriteLimitedInput) {
   WaitForPlayerState(kSbPlayerStateInitialized);
 
   // Seek to preroll.
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  SbPlayerSeek(player, first_input_timestamp_, /* ticket */ 1);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   SbPlayerSeek2(player, first_input_timestamp_, /* ticket */ 1);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 
   WaitForPlayerState(kSbPlayerStatePresenting);
 
   // Wait until the playback time is > 0.
   const SbTime kMaxWaitTime = 5 * kSbTimeSecond;
   SbTime start_of_wait = SbTimeGetMonotonicNow();
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  SbPlayerInfo info = {};
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   SbPlayerInfo2 info = {};
-
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   while (SbTimeGetMonotonicNow() - start_of_wait < kMaxWaitTime &&
          info.current_media_timestamp == 0) {
     SbThreadSleep(kSbTimeMillisecond * 500);
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+    SbPlayerGetInfo(player, &info);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
     SbPlayerGetInfo2(player, &info);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   }
 
   EXPECT_GT(info.current_media_timestamp, 0);
@@ -224,8 +232,11 @@ TEST_P(SbMediaSetAudioWriteDurationTest, WriteContinuedLimitedInput) {
   WaitForPlayerState(kSbPlayerStateInitialized);
 
   // Seek to preroll.
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  SbPlayerSeek(player, first_input_timestamp_, /* ticket */ 1);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   SbPlayerSeek2(player, first_input_timestamp_, /* ticket */ 1);
-
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   WaitForPlayerState(kSbPlayerStatePresenting);
 
   // Wait for the player to play far enough. It may not play all the way to
@@ -233,11 +244,20 @@ TEST_P(SbMediaSetAudioWriteDurationTest, WriteContinuedLimitedInput) {
   SbTime min_ending_playback_time = total_duration_ - kDuration;
   SbTime start_of_wait = SbTimeGetMonotonicNow();
   const SbTime kMaxWaitTime = total_duration_ + 5 * kSbTimeSecond;
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  SbPlayerInfo info;
+  SbPlayerGetInfo(player, &info);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   SbPlayerInfo2 info;
   SbPlayerGetInfo2(player, &info);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   while (info.current_media_timestamp < min_ending_playback_time &&
          (SbTimeGetMonotonicNow() - start_of_wait) < kMaxWaitTime) {
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+    SbPlayerGetInfo(player, &info);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
     SbPlayerGetInfo2(player, &info);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
     SbThreadSleep(kSmallWaitInterval);
     TryToWritePendingSample();
   }

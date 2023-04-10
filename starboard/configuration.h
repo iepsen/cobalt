@@ -65,6 +65,32 @@
 //   //   exposes functionality for my new feature.
 //   #define SB_MY_EXPERIMENTAL_FEATURE_VERSION SB_EXPERIMENTAL_API_VERSION
 
+// Improves audio access unit processing.
+//   1.  Abstracted stream specific info from SbMediaAudioSampleInfo and
+//       SbMediaVideoSampleInfo into SbMediaAudioStreamInfo and
+//       SbMediaVideoStreamInfo.
+//   2.  Removed unused info about the audio stream.
+//   3.  Renamed SbPlayerWriteSample2() to SbPlayerWriteSamples().
+#define SB_MEDIA_ENHANCED_AUDIO_API_VERSION SB_EXPERIMENTAL_API_VERSION
+
+// Minimum Starboard version for modular toolchain builds.
+#define SB_MINIMUM_API_VERSION_FOR_SB_MODULAR_BUILD SB_EXPERIMENTAL_API_VERSION
+
+// Support the IAMF audio codec.
+#define SB_MEDIA_IAMF_SUPPORT_API_VERSION SB_EXPERIMENTAL_API_VERSION
+
+// This configuration is set for modular builds, which have:
+//   1. Application binary built as a shared library.
+//   2. Either
+//     - Starboard built at a shared library and a separate loader_app
+//     executable.
+//     - A loader_app executable with Starboard built in ( Evergreen ).
+#define SB_MODULAR_BUILD \
+  (SB_API_VERSION >= SB_MINIMUM_API_VERSION_FOR_SB_MODULAR_BUILD)
+
+// Moved atomic operations C++ wrappers to starboard/common.
+#define SB_ATOMIC_MOVED_API_VERSION SB_EXPERIMENTAL_API_VERSION
+
 // --- Release Candidate Feature Defines -------------------------------------
 
 // --- Common Detected Features ----------------------------------------------
@@ -150,7 +176,7 @@ struct CompileAssert {};
   void operator=(const TypeName&) = delete
 #else
 #define SB_DISALLOW_COPY_AND_ASSIGN \
-  #error "The SB_DISALLOW_COPY_AND_ASSIGN macro is deprecated."
+#error "The SB_DISALLOW_COPY_AND_ASSIGN macro is deprecated."
 #endif  // SB_API_VERSION < 13
 
 // An enumeration of values for the kSbPreferredByteOrder configuration
@@ -240,7 +266,7 @@ struct CompileAssert {};
 #endif  // SB_OVERRIDE
 #else
 #define SB_OVERRIDE \
-  #error "The SB_OVERRIDE macro is deprecated. Please use \"override\" instead."
+#error "The SB_OVERRIDE macro is deprecated. Please use \"override\" instead."
 #endif  // SB_API_VERSION < 13
 
 // Declare numeric literals of signed 64-bit type.

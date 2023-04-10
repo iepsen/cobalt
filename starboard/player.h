@@ -25,6 +25,7 @@
 #include "starboard/drm.h"
 #include "starboard/export.h"
 #include "starboard/media.h"
+#include "starboard/time.h"
 #include "starboard/types.h"
 #include "starboard/window.h"
 
@@ -104,6 +105,17 @@ typedef struct SbPlayerCreationParam {
   // portions.  It will be |kSbDrmSystemInvalid| if the stream does not have
   // encrypted portions.
   SbDrmSystem drm_system;
+
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+  // Contains a populated SbMediaAudioStreamInfo if |audio_stream_info.codec|
+  // isn't |kSbMediaAudioCodecNone|.  When |audio_stream_info.codec| is
+  // |kSbMediaAudioCodecNone|, the video doesn't have an audio track.
+  SbMediaAudioStreamInfo audio_stream_info;
+  // Contains a populated SbMediaVideoStreamInfo if |video_stream_info.codec|
+  // isn't |kSbMediaVideoCodecNone|.  When |video_stream_info.codec| is
+  // |kSbMediaVideoCodecNone|, the video is audio only.
+  SbMediaVideoStreamInfo video_stream_info;
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   // Contains a populated SbMediaAudioSampleInfo if |audio_sample_info.codec|
   // isn't |kSbMediaAudioCodecNone|.  When |audio_sample_info.codec| is
   // |kSbMediaAudioCodecNone|, the video doesn't have an audio track.
@@ -112,6 +124,8 @@ typedef struct SbPlayerCreationParam {
   // isn't |kSbMediaVideoCodecNone|.  When |video_sample_info.codec| is
   // |kSbMediaVideoCodecNone|, the video is audio only.
   SbMediaVideoSampleInfo video_sample_info;
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+
   // Selects how the decoded video frames will be output.  For example,
   // |kSbPlayerOutputModePunchOut| indicates that the decoded video frames will
   // be output to a background video layer by the platform, and
@@ -144,7 +158,7 @@ typedef struct SbPlayerSampleSideData {
   size_t size;
 } SbPlayerSampleSideData;
 
-// Information about the samples to be written into SbPlayerWriteSample2.
+// Information about the samples to be written into SbPlayerWriteSamples().
 typedef struct SbPlayerSampleInfo {
   SbMediaType type;
   // Points to the buffer containing the sample data.
@@ -175,7 +189,11 @@ typedef struct SbPlayerSampleInfo {
 } SbPlayerSampleInfo;
 
 // Information about the current media playback state.
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+typedef struct SbPlayerInfo {
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 typedef struct SbPlayerInfo2 {
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
   // The position of the playback head, as precisely as possible, in
   // microseconds.
   SbTime current_media_timestamp;
@@ -220,7 +238,11 @@ typedef struct SbPlayerInfo2 {
   // is played in a slower than normal speed.  Negative speeds are not
   // supported.
   double playback_rate;
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+} SbPlayerInfo;
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 } SbPlayerInfo2;
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 
 // An opaque handle to an implementation-private structure representing a
 // player.
@@ -413,7 +435,7 @@ SbPlayerCreate(SbWindow window,
 // Note that it is not the responsibility of this function to verify whether the
 // video described by |creation_param| can be played on the platform, and the
 // implementation should try its best effort to return a valid output mode.
-// |creation_param| will never be NULL.
+// |creation_param| must not be NULL.
 SB_EXPORT SbPlayerOutputMode
 SbPlayerGetPreferredOutputMode(const SbPlayerCreationParam* creation_param);
 
@@ -425,11 +447,8 @@ SbPlayerGetPreferredOutputMode(const SbPlayerCreationParam* creation_param);
 //  * No more other callbacks should be issued after this function returns.
 //  * It is not allowed to pass |player| into any other |SbPlayer| function
 //    once SbPlayerDestroy has been called on that player.
-// |player|: The player to be destroyed.
+// |player|: The player to be destroyed. Must not be |kSbPlayerInvalid|.
 SB_EXPORT void SbPlayerDestroy(SbPlayer player);
-
-// SbPlayerSeek2 is like the deprecated SbPlayerSeek, but accepts SbTime
-// |seek_to_timestamp| instead of SbMediaTime |seek_to_pts|.
 
 // Tells the player to freeze playback (if playback has already started),
 // reset or flush the decoder pipeline, and go back to the Prerolling state.
@@ -448,43 +467,57 @@ SB_EXPORT void SbPlayerDestroy(SbPlayer player);
 //   that was specified when the player was created (SbPlayerCreate).
 //
 // |player|: The SbPlayer in which the seek operation is being performed.
+//   Must not be |kSbPlayerInvalid|.
+
 // |seek_to_timestamp|: The frame at which playback should begin.
 // |ticket|: A user-supplied unique ID that is be passed to all subsequent
 //   |SbPlayerDecoderStatusFunc| calls. (That is the |decoder_status_func|
 //   callback function specified when calling SbPlayerCreate.)
 //
 //   The |ticket| value is used to filter calls that may have been in flight
-//   when SbPlayerSeek2 was called. To be very specific, once SbPlayerSeek2 has
+//   when SbPlayerSeek was called. To be very specific, once SbPlayerSeek has
 //   been called with ticket X, a client should ignore all
 //   |SbPlayerDecoderStatusFunc| calls that do not pass in ticket X.
 
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+SB_EXPORT void SbPlayerSeek(SbPlayer player,
+                            SbTime seek_to_timestamp,
+                            int ticket);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 SB_EXPORT void SbPlayerSeek2(SbPlayer player,
                              SbTime seek_to_timestamp,
                              int ticket);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 
 // Writes samples of the given media type to |player|'s input stream. The
 // lifetime of |sample_infos|, and the members of its elements like |buffer|,
 // |video_sample_info|, and |drm_info| (as well as member |subsample_mapping|
 // contained inside it) are not guaranteed past the call to
-// SbPlayerWriteSample2. That means that before returning, the implementation
+// SbPlayerWriteSamples(). That means that before returning, the implementation
 // must synchronously copy any information it wants to retain from those
 // structures.
 //
-// SbPlayerWriteSample2 allows writing of multiple samples in one call.
+// SbPlayerWriteSamples() allows writing of multiple samples in one call.
 //
-// |player|: The player to which the sample is written.
+// |player|: The player to which the sample is written. Must not be
+//   |kSbPlayerInvalid|.
+
 // |sample_type|: The type of sample being written. See the |SbMediaType|
 //   enum in media.h.
 // |sample_infos|: A pointer to an array of SbPlayerSampleInfo with
 //   |number_of_sample_infos| elements, each holds the data for an sample, i.e.
 //   a sequence of whole NAL Units for video, or a complete audio frame.
 //   |sample_infos| cannot be assumed to live past the call into
-//   SbPlayerWriteSample2(), so it must be copied if its content will be used
-//   after SbPlayerWriteSample2() returns.
+//   SbPlayerWriteSamples(), so it must be copied if its content will be used
+//   after SbPlayerWriteSamples() returns.
 // |number_of_sample_infos|: Specify the number of samples contained inside
 //   |sample_infos|.  It has to be at least one, and less than the return value
 //   of SbPlayerGetMaximumNumberOfSamplesPerWrite().
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+SB_EXPORT void SbPlayerWriteSamples(SbPlayer player,
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 SB_EXPORT void SbPlayerWriteSample2(SbPlayer player,
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
                                     SbMediaType sample_type,
                                     const SbPlayerSampleInfo* sample_infos,
                                     int number_of_sample_infos);
@@ -526,7 +559,7 @@ SB_EXPORT void SbPlayerWriteEndOfStream(SbPlayer player,
 // frame, implementors should take care to avoid related performance concerns
 // with such frequent calls.
 //
-// |player|: The player that is being resized.
+// |player|: The player that is being resized. Must not be |kSbPlayerInvalid|.
 // |z_index|: The z-index of the player.  When the bounds of multiple players
 //            are overlapped, the one with larger z-index will be rendered on
 //            top of the ones with smaller z-index.
@@ -551,27 +584,33 @@ SB_EXPORT void SbPlayerSetBounds(SbPlayer player,
 // to a rate that is close to |playback_rate| which the implementation supports.
 // It returns false when the playback rate is unchanged, this can happen when
 // |playback_rate| is negative or if it is too high to support.
+//
+// |player| must not be |kSbPlayerInvalid|.
 SB_EXPORT bool SbPlayerSetPlaybackRate(SbPlayer player, double playback_rate);
 
 // Sets the player's volume.
 //
-// |player|: The player in which the volume is being adjusted.
+// |player|: The player in which the volume is being adjusted. Must not be
+//   |kSbPlayerInvalid|.
 // |volume|: The new player volume. The value must be between |0.0| and |1.0|,
 //   inclusive. A value of |0.0| means that the audio should be muted, and a
 //   value of |1.0| means that it should be played at full volume.
 SB_EXPORT void SbPlayerSetVolume(SbPlayer player, double volume);
 
-// SbPlayerGetInfo2 is like the deprecated SbPlayerGetInfo, but accepts
-// SbPlayerInfo2* |out_player_info2| instead of SbPlayerInfo |out_player_info|.
-
 // Gets a snapshot of the current player state and writes it to
 // |out_player_info|. This function may be called very frequently and is
 // expected to be inexpensive.
 //
-// |player|: The player about which information is being retrieved.
+// |player|: The player about which information is being retrieved. Must not be
+//   |kSbPlayerInvalid|.
 // |out_player_info|: The information retrieved for the player.
+
+#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+SB_EXPORT void SbPlayerGetInfo(SbPlayer player, SbPlayerInfo* out_player_info);
+#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
 SB_EXPORT void SbPlayerGetInfo2(SbPlayer player,
                                 SbPlayerInfo2* out_player_info2);
+#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VER
 
 // Given a player created with the kSbPlayerOutputModeDecodeToTexture
 // output mode, it will return a SbDecodeTarget representing the current frame
@@ -580,6 +619,8 @@ SB_EXPORT void SbPlayerGetInfo2(SbPlayer player,
 // be used to eventually render the frame.  If this function is called with a
 // |player| object that was created with an output mode other than
 // kSbPlayerOutputModeDecodeToTexture, kSbDecodeTargetInvalid is returned.
+//
+// |player| must not be |kSbPlayerInvalid|.
 SB_EXPORT SbDecodeTarget SbPlayerGetCurrentFrame(SbPlayer player);
 
 #ifdef __cplusplus

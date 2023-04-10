@@ -27,11 +27,11 @@
 #include "base/optional.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread_checker.h"
 #include "base/trace_event/trace_event.h"
 #include "cobalt/base/c_val.h"
 #include "cobalt/base/debugger_hooks.h"
 #include "cobalt/base/language.h"
-#include "cobalt/base/startup_timer.h"
 #include "cobalt/base/tokens.h"
 #include "cobalt/base/type_id.h"
 #include "cobalt/browser/splash_screen_cache.h"
@@ -106,6 +106,25 @@ CacheUrlContentCallback(SplashScreenCache* splash_screen_cache) {
   } else {
     return base::Callback<void(const std::string&,
                                const base::Optional<std::string>&)>();
+  }
+}
+
+void CancelScroll(ui_navigation::scroll_engine::ScrollEngine* scroll_engine,
+                  const scoped_refptr<ui_navigation::NavItem>& nav_item) {
+  auto nav_items = std::vector<scoped_refptr<ui_navigation::NavItem>>{nav_item};
+  scroll_engine->thread()->message_loop()->task_runner()->PostTask(
+      FROM_HERE, base::Bind(&ui_navigation::scroll_engine::ScrollEngine::
+                                CancelActiveScrollsForNavItems,
+                            base::Unretained(scroll_engine), nav_items));
+}
+
+dom::Window::NavItemCallback CancelScrollCallback(
+    ui_navigation::scroll_engine::ScrollEngine* scroll_engine) {
+  if (scroll_engine) {
+    return base::Bind(CancelScroll, base::Unretained(scroll_engine));
+  } else {
+    return base::Callback<void(
+        const scoped_refptr<cobalt::ui_navigation::NavItem>& nav_item)>();
   }
 }
 
@@ -238,9 +257,6 @@ class WebModule::Impl {
 
   void ReduceMemory();
 
-  void LogScriptError(const base::SourceLocation& source_location,
-                      const std::string& error_message);
-
   void IsReadyToFreeze(volatile bool* is_ready_to_freeze) {
     if (window_->media_session()->media_session_client() == NULL) {
       *is_ready_to_freeze = true;
@@ -291,8 +307,6 @@ class WebModule::Impl {
   void ProcessOnRenderTreeRasterized(const base::TimeTicks& produced_time,
                                      const base::TimeTicks& rasterized_time);
 
-  void OnCspPolicyChanged();
-
   scoped_refptr<script::GlobalEnvironment> global_environment() {
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
     return web_context_->global_environment();
@@ -317,10 +331,6 @@ class WebModule::Impl {
       }
     }
   }
-
-  // Report an error encountered while running JS.
-  // Returns whether or not the error was handled.
-  bool ReportScriptError(const script::ErrorReport& error_report);
 
   // Inject the DOM event object into the window or the element.
   void InjectInputEvent(scoped_refptr<dom::Element> element,
@@ -498,11 +508,6 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
 #endif  // defined(ENABLE_DEBUGGER)
       synchronous_loader_interrupt_(data.synchronous_loader_interrupt) {
   DCHECK(web_context_);
-#if defined(COBALT_ENABLE_JAVASCRIPT_ERROR_LOGGING)
-  script::JavaScriptEngine::ErrorHandler error_handler =
-      base::Bind(&WebModule::Impl::LogScriptError, base::Unretained(this));
-  web_context_->javascript_engine()->RegisterErrorHandler(error_handler);
-#endif
   css_parser::Parser::SupportsMapToMeshFlag supports_map_to_mesh =
       data.options.enable_map_to_mesh
           ? css_parser::Parser::kSupportsMapToMesh
@@ -514,7 +519,7 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
   dom_parser_.reset(new dom_parser::Parser(
       kDOMMaxElementDepth,
       base::Bind(&WebModule::Impl::OnLoadComplete, base::Unretained(this)),
-      data.options.require_csp));
+      data.options.csp_header_policy));
   DCHECK(dom_parser_);
 
   on_before_unload_fired_but_not_handled_ =
@@ -581,7 +586,7 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
     memory_info = stub_decoder_buffer_memory_info_.get();
   }
 
-  web_context_->setup_environment_settings(new dom::DOMSettings(
+  web_context_->SetupEnvironmentSettings(new dom::DOMSettings(
       debugger_hooks_, kDOMMaxElementDepth, media_source_registry_.get(),
       data.can_play_type_handler, memory_info, &mutation_observer_task_manager_,
       data.options.dom_settings_options));
@@ -596,6 +601,9 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
 
   dom::Window::CacheCallback splash_screen_cache_callback =
       CacheUrlContentCallback(data.options.splash_screen_cache);
+
+  dom::Window::NavItemCallback cancel_scroll_callback =
+      CancelScrollCallback(data.scroll_engine);
 
   // These members will reference other |Traceable|s, however are not
   // accessible from |Window|, so we must explicitly add them as roots.
@@ -635,9 +643,10 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
       base::GetSystemLanguageScript(), data.options.navigation_callback,
       base::Bind(&WebModule::Impl::OnLoadComplete, base::Unretained(this)),
       web_context_->network_module()->cookie_jar(),
-      web_context_->network_module()->GetPostSender(), data.options.require_csp,
-      data.options.csp_enforcement_mode,
-      base::Bind(&WebModule::Impl::OnCspPolicyChanged, base::Unretained(this)),
+      web::CspDelegate::Options(web_context_->network_module()->GetPostSender(),
+                                data.options.csp_header_policy,
+                                data.options.csp_enforcement_type,
+                                data.options.csp_insecure_allowed_token),
       base::Bind(&WebModule::Impl::OnRanAnimationFrameCallbacks,
                  base::Unretained(this)),
       data.window_close_callback, data.window_minimize_callback,
@@ -645,10 +654,11 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
       base::Bind(&WebModule::Impl::OnStartDispatchEvent,
                  base::Unretained(this)),
       base::Bind(&WebModule::Impl::OnStopDispatchEvent, base::Unretained(this)),
-      data.options.provide_screenshot_function, synchronous_loader_interrupt_,
-      data.options.enable_inline_script_warnings, data.ui_nav_root,
-      data.options.enable_map_to_mesh, data.options.csp_insecure_allowed_token,
-      data.dom_max_element_depth, data.options.video_playback_rate_multiplier,
+      data.options.provide_screenshot_function, cancel_scroll_callback,
+      synchronous_loader_interrupt_, data.options.enable_inline_script_warnings,
+      data.ui_nav_root, data.options.enable_map_to_mesh,
+      data.options.csp_insecure_allowed_token, data.dom_max_element_depth,
+      data.options.video_playback_rate_multiplier,
 #if defined(ENABLE_TEST_RUNNER)
       data.options.layout_trigger == layout::LayoutManager::kTestRunnerMode
           ? dom::Window::kClockTypeTestRunner
@@ -699,21 +709,6 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
       data.options.clear_window_with_background_color));
   DCHECK(layout_manager_);
 
-#if !defined(COBALT_FORCE_CSP)
-  if (data.options.csp_enforcement_mode == web::kCspEnforcementDisable) {
-    // If CSP is disabled, enable eval(). Otherwise, it will be enabled by
-    // a CSP directive.
-    web_context_->global_environment()->EnableEval();
-  }
-#endif
-
-  web_context_->global_environment()->SetReportEvalCallback(
-      base::Bind(&web::CspDelegate::ReportEval,
-                 base::Unretained(window_->csp_delegate())));
-
-  web_context_->global_environment()->SetReportErrorCallback(
-      base::Bind(&WebModule::Impl::ReportScriptError, base::Unretained(this)));
-
   if (!data.options.loaded_callbacks.empty()) {
     document_load_observer_.reset(
         new DocumentLoadedObserver(data.options.loaded_callbacks));
@@ -733,6 +728,7 @@ WebModule::Impl::Impl(web::Context* web_context, const ConstructionData& data)
   report_unload_timing_info_callback_ =
       data.options.collect_unload_event_time_callback;
 
+  web_context_->SetupFinished();
   is_running_ = true;
 }
 
@@ -1015,29 +1011,6 @@ void WebModule::Impl::SetUnloadEventTimingInfo(base::TimeTicks start_time,
   }
 }
 
-void WebModule::Impl::OnCspPolicyChanged() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(is_running_);
-  DCHECK(window_);
-  DCHECK(window_->csp_delegate());
-
-  std::string eval_disabled_message;
-  bool allow_eval = window_->csp_delegate()->AllowEval(&eval_disabled_message);
-  if (allow_eval) {
-    web_context_->global_environment()->EnableEval();
-  } else {
-    web_context_->global_environment()->DisableEval(eval_disabled_message);
-  }
-}
-
-bool WebModule::Impl::ReportScriptError(
-    const script::ErrorReport& error_report) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(is_running_);
-  DCHECK(window_);
-  return window_->ReportScriptError(error_report);
-}
-
 #if defined(ENABLE_WEBDRIVER)
 void WebModule::Impl::CreateWindowDriver(
     const webdriver::protocol::WindowId& window_id,
@@ -1233,25 +1206,6 @@ void WebModule::Impl::ReduceMemory() {
   if (web_context_ && web_context_->javascript_engine()) {
     web_context_->javascript_engine()->CollectGarbage();
   }
-}
-
-void WebModule::Impl::LogScriptError(
-    const base::SourceLocation& source_location,
-    const std::string& error_message) {
-  std::string file_name =
-      base::FilePath(source_location.file_path).BaseName().value();
-
-  std::stringstream ss;
-  base::TimeDelta dt = base::StartupTimer::TimeElapsed();
-
-  // Create the error output.
-  // Example:
-  //   JS:50250:file.js(29,80): ka(...) is not iterable
-  //   JS:<time millis><js-file-name>(<line>,<column>):<message>
-  ss << "JS:" << dt.InMilliseconds() << ":" << file_name << "("
-     << source_location.line_number << "," << source_location.column_number
-     << "): " << error_message << "\n";
-  SbLogRaw(ss.str().c_str());
 }
 
 void WebModule::Impl::InjectBeforeUnloadEvent() {

@@ -21,6 +21,7 @@
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/trace_event.h"
+#include "cobalt/base/startup_timer.h"
 #include "cobalt/loader/fetcher_factory.h"
 #include "cobalt/loader/script_loader_factory.h"
 #include "cobalt/script/environment_settings.h"
@@ -94,17 +95,18 @@ class Impl : public Context {
   }
 
   const std::string& name() const final { return name_; };
-  void setup_environment_settings(
+  void SetupEnvironmentSettings(
       EnvironmentSettings* environment_settings) final {
     for (auto& observer : environment_settings_change_observers_) {
       observer.OnEnvironmentSettingsChanged(!!environment_settings);
     }
     environment_settings_.reset(environment_settings);
-    if (environment_settings_) environment_settings_->set_context(this);
-    if (service_worker_jobs_) {
-      service_worker_jobs_->SetActiveWorker(environment_settings);
+    if (environment_settings_) {
+      environment_settings_->set_context(this);
     }
   }
+
+  void SetupFinished();
 
   EnvironmentSettings* environment_settings() const final {
     DCHECK(environment_settings_);
@@ -226,6 +228,24 @@ class Impl : public Context {
       environment_settings_change_observers_;
 };
 
+void LogScriptError(const base::SourceLocation& source_location,
+                    const std::string& error_message) {
+  std::string file_name =
+      base::FilePath(source_location.file_path).BaseName().value();
+
+  std::stringstream ss;
+  base::TimeDelta dt = base::StartupTimer::TimeElapsed();
+
+  // Create the error output.
+  // Example:
+  //   JS:50250:file.js(29,80): ka(...) is not iterable
+  //   JS:<time millis><js-file-name>(<line>,<column>):<message>
+  ss << "JS:" << dt.InMilliseconds() << ":" << file_name << "("
+     << source_location.line_number << "," << source_location.column_number
+     << "): " << error_message << "\n";
+  SbLogRaw(ss.str().c_str());
+}
+
 Impl::Impl(const std::string& name, const Agent::Options& options)
     : name_(name), web_settings_(options.web_settings) {
   TRACE_EVENT0("cobalt::web", "Agent::Impl::Impl()");
@@ -246,6 +266,12 @@ Impl::Impl(const std::string& name, const Agent::Options& options)
   javascript_engine_ =
       script::JavaScriptEngine::CreateEngine(options.javascript_engine_options);
   DCHECK(javascript_engine_);
+
+#if defined(COBALT_ENABLE_JAVASCRIPT_ERROR_LOGGING)
+  script::JavaScriptEngine::ErrorHandler error_handler =
+      base::Bind(&LogScriptError);
+  javascript_engine_->RegisterErrorHandler(error_handler);
+#endif
 
   global_environment_ = javascript_engine_->CreateGlobalEnvironment();
   DCHECK(global_environment_);
@@ -285,7 +311,7 @@ void Impl::ShutDownJavaScriptEngine() {
         script::GlobalEnvironment::ReportErrorCallback());
   }
 
-  setup_environment_settings(nullptr);
+  SetupEnvironmentSettings(nullptr);
   environment_settings_change_observers_.Clear();
   blob_registry_.reset();
   script_runner_.reset();
@@ -313,6 +339,26 @@ void Impl::RemoveEnvironmentSettingsChangeObserver(
     Context::EnvironmentSettingsChangeObserver* observer) {
   environment_settings_change_observers_.RemoveObserver(observer);
 }
+
+void Impl::SetupFinished() {
+  auto* global_scope = GetWindowOrWorkerGlobalScope();
+#if !defined(COBALT_FORCE_CSP)
+  if (global_scope && global_scope->options().csp_options.enforcement_type ==
+                          web::kCspEnforcementDisable) {
+    // If CSP is disabled, enable eval(). Otherwise, it will be enabled by
+    // a CSP directive.
+    global_environment_->EnableEval();
+  }
+#endif
+
+  if (service_worker_jobs_) {
+    service_worker_jobs_->RegisterWebContext(this);
+  }
+  if (service_worker_jobs_) {
+    service_worker_jobs_->SetActiveWorker(environment_settings_.get());
+  }
+}
+
 
 void Impl::InjectGlobalObjectAttributes(
     const Agent::Options::InjectedGlobalObjectAttributes& attributes) {
@@ -553,9 +599,6 @@ Context* Agent::CreateContext(const std::string& name, const Options& options,
                               base::MessageLoop* message_loop) {
   auto* context = new Impl(name, options);
   context->set_message_loop(message_loop);
-  if (options.service_worker_jobs) {
-    options.service_worker_jobs->RegisterWebContext(context);
-  }
   return context;
 }
 

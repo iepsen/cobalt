@@ -339,6 +339,8 @@ class MEDIA_EXPORT SbPlayerPipeline : public Pipeline,
   base::CVal<SbTime> last_media_time_;
   // Time when we last checked the media time.
   SbTime last_time_media_time_retrieved_ = 0;
+  // Counter for retrograde media time.
+  size_t retrograde_media_time_counter_ = 0;
   // The maximum video playback capabilities required for the playback.
   base::CVal<std::string> max_video_capabilities_;
 
@@ -617,6 +619,7 @@ void SbPlayerPipeline::Seek(TimeDelta time, const SeekCB& seek_cb) {
   // decide when to delay.
   audio_read_delayed_ = false;
   StoreMediaTime(seek_time_);
+  retrograde_media_time_counter_ = 0;
   timestamp_of_last_written_audio_ = 0;
 
 #if SB_HAS(PLAYER_WITH_URL)
@@ -704,10 +707,17 @@ TimeDelta SbPlayerPipeline::GetMediaTime() {
 
   // Guarantee that we report monotonically increasing media time
   if (media_time.ToSbTime() < last_media_time_) {
-    DLOG(WARNING) << "The new media timestamp player reported ("
-                  << media_time.ToSbTime() << ") is less than the last one ("
-                  << last_media_time_ << ").";
+    if (retrograde_media_time_counter_ == 0) {
+      DLOG(WARNING) << "Received retrograde media time, new:"
+                    << media_time.ToSbTime() << ", last: " << last_media_time_
+                    << ".";
+    }
     media_time = base::TimeDelta::FromMicroseconds(last_media_time_);
+    retrograde_media_time_counter_++;
+  } else if (retrograde_media_time_counter_ != 0) {
+    DLOG(WARNING) << "Received " << retrograde_media_time_counter_
+                  << " retrograde media time before recovered.";
+    retrograde_media_time_counter_ = 0;
   }
   StoreMediaTime(media_time);
   return media_time;
@@ -927,7 +937,8 @@ void SbPlayerPipeline::CreateUrlPlayer(const std::string& source_url) {
         sbplayer_interface_, task_runner_, source_url, window_, this,
         set_bounds_helper_.get(), allow_resume_after_suspend_,
         *decode_to_texture_output_mode_,
-        on_encrypted_media_init_data_encountered_cb_, decode_target_provider_));
+        on_encrypted_media_init_data_encountered_cb_, decode_target_provider_,
+        pipeline_identifier_));
     if (player_bridge_->IsValid()) {
       SetPlaybackRateTask(playback_rate_);
       SetVolumeTask(volume_);
@@ -1032,7 +1043,7 @@ void SbPlayerPipeline::CreatePlayer(SbDrmSystem drm_system) {
         audio_mime_type, video_config, video_mime_type, window_, drm_system,
         this, set_bounds_helper_.get(), allow_resume_after_suspend_,
         *decode_to_texture_output_mode_, decode_target_provider_,
-        max_video_capabilities_));
+        max_video_capabilities_, pipeline_identifier_));
     if (player_bridge_->IsValid()) {
       SetPlaybackRateTask(playback_rate_);
       SetVolumeTask(volume_);
@@ -1405,6 +1416,10 @@ void SbPlayerPipeline::DelayedNeedData(int max_number_of_buffers_to_write) {
 void SbPlayerPipeline::UpdateDecoderConfig(DemuxerStream* stream) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
+  if (!player_bridge_) {
+    return;
+  }
+
   if (stream->type() == DemuxerStream::AUDIO) {
     const AudioDecoderConfig& decoder_config = stream->audio_decoder_config();
     player_bridge_->UpdateAudioConfig(decoder_config, stream->mime_type());
@@ -1492,7 +1507,17 @@ void SbPlayerPipeline::ResumeTask(PipelineWindow window,
 
   window_ = window;
 
-  if (player_bridge_) {
+  bool resumable = true;
+  bool resume_to_background_mode = !SbWindowIsValid(window_);
+  bool is_audioless = !HasAudio();
+  if (resume_to_background_mode && is_audioless) {
+    // Avoid resuming an audioless video to background mode. SbPlayerBridge will
+    // try to create an SbPlayer with only the video stream disabled, and may
+    // crash in this case as SbPlayerCreate() will fail without an audio or
+    // video stream.
+    resumable = false;
+  }
+  if (player_bridge_ && resumable) {
     player_bridge_->Resume(window);
     if (!player_bridge_->IsValid()) {
       std::string error_message;
@@ -1509,8 +1534,6 @@ void SbPlayerPipeline::ResumeTask(PipelineWindow window,
                   "SbPlayerPipeline::ResumeTask failed to create a valid "
                   "SbPlayerBridge - " +
                       time_information + " \'" + error_message + "\'");
-      done_event->Signal();
-      return;
     }
   }
 
