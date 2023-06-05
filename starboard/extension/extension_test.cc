@@ -25,6 +25,7 @@
 #include "starboard/extension/javascript_cache.h"
 #include "starboard/extension/media_session.h"
 #include "starboard/extension/memory_mapped_file.h"
+#include "starboard/extension/platform_info.h"
 #include "starboard/extension/platform_service.h"
 #include "starboard/extension/updater_notification.h"
 #include "starboard/extension/url_fetcher_observer.h"
@@ -394,7 +395,7 @@ TEST(ExtensionTest, EnhancedAudio) {
     return;
   }
 
-#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#if SB_API_VERSION >= 15
   ASSERT_FALSE(extension_api)
       << "EnhancedAudio extension shouldn't be used under SB_API_VERSION "
       << SB_API_VERSION
@@ -404,11 +405,32 @@ TEST(ExtensionTest, EnhancedAudio) {
       << " implementation to `SbPlayerWriteSample()` (as they are compatible"
       << " at abi level) and disable the EnhancedAudio extension from"
       << " `SbSystemGetExtension()`.";
-#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#endif  // SB_API_VERSION >= 15
 
   EXPECT_STREQ(extension_api->name, kExtensionName);
   EXPECT_EQ(extension_api->version, 1u);
   EXPECT_NE(extension_api->PlayerWriteSamples, nullptr);
+
+  const ExtensionApi* second_extension_api =
+      static_cast<const ExtensionApi*>(SbSystemGetExtension(kExtensionName));
+  EXPECT_EQ(second_extension_api, extension_api)
+      << "Extension struct should be a singleton";
+}
+
+TEST(ExtensionTest, PlatformInfo) {
+  typedef CobaltExtensionPlatformInfoApi ExtensionApi;
+  const char* kExtensionName = kCobaltExtensionPlatformInfoName;
+
+  const ExtensionApi* extension_api =
+      static_cast<const ExtensionApi*>(SbSystemGetExtension(kExtensionName));
+  if (!extension_api) {
+    return;
+  }
+
+  EXPECT_STREQ(extension_api->name, kExtensionName);
+  EXPECT_EQ(extension_api->version, 1u);
+  EXPECT_NE(extension_api->GetFirmwareVersionDetails, nullptr);
+  EXPECT_NE(extension_api->GetOsExperience, nullptr);
 
   const ExtensionApi* second_extension_api =
       static_cast<const ExtensionApi*>(SbSystemGetExtension(kExtensionName));

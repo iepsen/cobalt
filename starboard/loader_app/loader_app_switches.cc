@@ -25,6 +25,7 @@ const char kShowSABI[] = "show_sabi";
 const char kUseCompressedUpdates[] = "use_compressed_updates";
 const char kLoaderUseMemoryMappedFile[] = "loader_use_mmap_file";
 const char kLoaderTrackMemory[] = "loader_track_memory";
+const char kResetEvergreenUpdate[] = "reset_evergreen_update";
 
 }  // namespace loader_app
 }  // namespace starboard

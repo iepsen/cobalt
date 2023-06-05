@@ -22,17 +22,10 @@ import os
 import sys
 
 from starboard.build.platforms import PLATFORMS
-from starboard.tools import config
 from starboard.tools import paths
-from starboard.tools import download_clang
 
 _STARBOARD_TOOLCHAINS_DIR_KEY = 'STARBOARD_TOOLCHAINS_DIR'
 _STARBOARD_TOOLCHAINS_DIR_NAME = 'starboard-toolchains'
-
-# TODO: Rectify consistency of "Build Type" / "Build Config" naming.
-_BUILD_CONFIG_KEY = 'BUILD_TYPE'
-_BUILD_PLATFORM_KEY = 'BUILD_PLATFORM'
-_BUILD_CONFIGURATION_KEY = 'BUILD_CONFIGURATION'
 
 
 class ClangSpecification(object):
@@ -43,91 +36,6 @@ class ClangSpecification(object):
     assert version
     self.revision = revision
     self.version = version
-
-
-def _CheckConfig(key, raw_value, value):
-  if config.IsValid(value):
-    return True
-
-  logging.warning("Environment variable '%s' is '%s', which is invalid.", key,
-                  raw_value)
-  logging.warning('Valid build configurations: %s', config.GetAll())
-  return False
-
-
-def _CheckPlatform(key, raw_value, value):
-  if value in PLATFORMS:
-    return True
-
-  logging.warning("Environment variable '%s' is '%s', which is invalid.", key,
-                  raw_value)
-  logging.warning('Valid platforms: %s', list(PLATFORMS.keys()))
-  return False
-
-
-def GetDefaultConfigAndPlatform():
-  """Returns a (config_name, platform_name) tuple based on the environment."""
-  default_config_name = None
-  default_platform_name = None
-  if _BUILD_CONFIG_KEY in os.environ:
-    raw_config_name = os.environ[_BUILD_CONFIG_KEY]
-    config_name = raw_config_name.lower()
-    if _CheckConfig(_BUILD_CONFIG_KEY, raw_config_name, config_name):
-      default_config_name = config_name
-
-  if _BUILD_PLATFORM_KEY in os.environ:
-    raw_platform_name = os.environ[_BUILD_PLATFORM_KEY]
-    platform_name = raw_platform_name.lower()
-    if _CheckPlatform(_BUILD_PLATFORM_KEY, raw_platform_name, platform_name):
-      default_platform_name = platform_name
-
-  if default_config_name and default_platform_name:
-    return default_config_name, default_platform_name
-
-  # Only check BUILD_CONFIGURATION if either platform or config is not
-  # provided individually, or at least one is invalid.
-  if _BUILD_CONFIGURATION_KEY not in os.environ:
-    return default_config_name, default_platform_name
-
-  raw_configuration = os.environ[_BUILD_CONFIGURATION_KEY]
-  build_configuration = raw_configuration.lower()
-  if '_' not in build_configuration:
-    logging.warning(
-        "Expected a '_' in '%s' and did not find one.  "
-        "'%s' must be of the form <platform>_<config>.",
-        _BUILD_CONFIGURATION_KEY, _BUILD_CONFIGURATION_KEY)
-    return default_config_name, default_platform_name
-
-  platform_name, config_name = build_configuration.split('_', 1)
-  if not default_config_name:
-    if _CheckConfig(_BUILD_CONFIGURATION_KEY, raw_configuration, config_name):
-      default_config_name = config_name
-
-  if not default_platform_name:
-    if _CheckPlatform(_BUILD_CONFIGURATION_KEY, raw_configuration,
-                      platform_name):
-      default_platform_name = platform_name
-
-  return default_config_name, default_platform_name
-
-
-def GetGyp():
-  """Gets the GYP module, loading it, if necessary."""
-  if 'gyp' not in sys.modules:
-    sys.path.insert(
-        0, os.path.join(paths.REPOSITORY_ROOT, 'tools', 'gyp', 'pylib'))
-    importlib.import_module('gyp')
-  return sys.modules['gyp']
-
-
-def GypDebugOptions():
-  """Returns all valid GYP debug options."""
-  debug_modes = []
-  gyp = GetGyp()
-  for name in dir(gyp):
-    if name.startswith('DEBUG_'):
-      debug_modes.append(getattr(gyp, name))
-  return debug_modes
 
 
 def GetToolchainsDir():
@@ -151,40 +59,6 @@ def _GetClangBasePath(clang_spec):
 
 def GetClangBinPath(clang_spec):
   return os.path.join(_GetClangBasePath(clang_spec), 'bin')
-
-
-def EnsureClangAvailable(clang_spec):
-  """Ensure the expected version of Clang is available."""
-
-  # Run the Clang update tool to ensure correct version of Clang,
-  # then check that Clang is in the path.
-  base_dir = _GetClangBasePath(clang_spec)
-  download_clang.UpdateClang(target_dir=base_dir, revision=clang_spec.revision)
-
-  # update.sh downloads Clang to this path.
-  clang_bin = os.path.join(GetClangBinPath(clang_spec), 'clang')
-
-  if not os.path.exists(clang_bin):
-    raise RuntimeError('Clang not found.')
-
-  return _GetClangBasePath(clang_spec)
-
-
-def GetHostCompilerEnvironment(clang_spec, build_accelerator):
-  """Return the host compiler toolchain environment."""
-  toolchain_dir = EnsureClangAvailable(clang_spec)
-  toolchain_bin_dir = os.path.join(toolchain_dir, 'bin')
-
-  cc_clang = os.path.join(toolchain_bin_dir, 'clang')
-  cxx_clang = os.path.join(toolchain_bin_dir, 'clang++')
-  host_clang_environment = {
-      'CC_host': build_accelerator + ' ' + cc_clang,
-      'CXX_host': build_accelerator + ' ' + cxx_clang,
-      'LD_host': cxx_clang,
-      'ARFLAGS_host': 'rcs',
-      'ARTHINFLAGS_host': 'rcsT',
-  }
-  return host_clang_environment
 
 
 def _ModuleLoaded(module_name, module_path):
@@ -224,8 +98,8 @@ def _LoadPlatformModule(platform_name, file_name, function_name):
       else:
         platform_module = sys.modules['platform_module']
     else:
-      module_path = os.path.join('config', '%s.py' % platform_name)
-      platform_module = importlib.import_module('config.%s' % platform_name)
+      module_path = os.path.join('config', f'{platform_name}.py')
+      platform_module = importlib.import_module(f'config.{platform_name}')
   except (ImportError, IOError):
     logging.exception('Unable to import "%s".', module_path)
     return None

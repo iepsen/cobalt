@@ -217,7 +217,7 @@ void InstallCrashpadHandler(const CommandLine& command_line) {
 void* ThreadEntryPoint(void* context) {
   g_app_created_semaphore = static_cast<Semaphore*>(context);
 
-#if SB_MODULAR_BUILD
+#if SB_API_VERSION >= 15
   int unused_value = -1;
   int error_level = SbRunStarboardMain(unused_value, nullptr, SbEventHandle);
 #else
@@ -241,7 +241,7 @@ void* ThreadEntryPoint(void* context) {
   // Enter the Starboard run loop until stopped.
   int error_level =
       app.Run(std::move(command_line), GetStartDeepLink().c_str());
-#endif  // SB_MODULAR_BUILD
+#endif  // SB_API_VERSION >= 15
 
   // Mark the app not running before informing StarboardBridge that the app is
   // stopped so that we won't send any more AndroidCommands as a result of
@@ -374,9 +374,28 @@ Java_dev_cobalt_coat_StarboardBridge_nativeInitialize(
   JniEnvExt::Initialize(env, starboard_bridge);
 }
 
+extern "C" SB_EXPORT_PLATFORM void
+Java_dev_cobalt_coat_VolumeStateReceiver_nativeVolumeChanged(JNIEnv* env,
+                                                             jobject jcaller,
+                                                             jint volumeDelta) {
+  if (g_app_running) {
+    SbKey key =
+        volumeDelta > 0 ? SbKey::kSbKeyVolumeUp : SbKey::kSbKeyVolumeDown;
+    ApplicationAndroid::Get()->SendKeyboardInject(key);
+  }
+}
+
+extern "C" SB_EXPORT_PLATFORM void
+Java_dev_cobalt_coat_VolumeStateReceiver_nativeMuteChanged(JNIEnv* env,
+                                                           jobject jcaller) {
+  if (g_app_running) {
+    ApplicationAndroid::Get()->SendKeyboardInject(SbKey::kSbKeyVolumeMute);
+  }
+}
+
 }  // namespace
 
-#if SB_MODULAR_BUILD
+#if SB_API_VERSION >= 15
 extern "C" int SbRunStarboardMain(int argc,
                                   char** argv,
                                   SbEventHandleCallback callback) {
@@ -398,7 +417,7 @@ extern "C" int SbRunStarboardMain(int argc,
       app.Run(std::move(command_line), GetStartDeepLink().c_str());
   return error_level;
 }
-#endif  // SB_MODULAR_BUILD
+#endif  // SB_API_VERSION >= 15
 
 }  // namespace shared
 }  // namespace android

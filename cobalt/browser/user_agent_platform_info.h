@@ -43,7 +43,11 @@ class UserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   base::Optional<std::string> original_design_manufacturer() const override {
     return original_design_manufacturer_;
   }
+
+#if SB_API_VERSION < 15
   SbSystemDeviceType device_type() const override { return device_type_; }
+#endif
+
   const std::string& device_type_string() const override {
     return device_type_string_;
   }
@@ -72,6 +76,10 @@ class UserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   const std::string& evergreen_version() const override {
     return evergreen_version_;
   }
+  const std::string& firmware_version_details() const override {
+    return firmware_version_details_;
+  }
+  const std::string& os_experience() const override { return os_experience_; }
   const std::string& cobalt_version() const override { return cobalt_version_; }
   const std::string& cobalt_build_version_number() const override {
     return cobalt_build_version_number_;
@@ -86,7 +94,10 @@ class UserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   void set_os_name_and_version(const std::string& os_name_and_version);
   void set_original_design_manufacturer(
       base::Optional<std::string> original_design_manufacturer);
+#if SB_API_VERSION < 15
   void set_device_type(SbSystemDeviceType device_type);
+#endif
+  void set_device_type(const std::string& device_type);
   void set_chipset_model_number(
       base::Optional<std::string> chipset_model_number);
   void set_model_year(base::Optional<std::string> model_year);
@@ -100,6 +111,9 @@ class UserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   void set_evergreen_type(const std::string& evergreen_type);
   void set_evergreen_file_type(const std::string& evergreen_file_type);
   void set_evergreen_version(const std::string& evergreen_version);
+  void set_firmware_version_details(
+      const std::string& firmware_version_details);
+  void set_os_experience(const std::string& os_experience);
   void set_cobalt_version(const std::string& cobalt_version);
   void set_cobalt_build_version_number(
       const std::string& cobalt_build_version_number);
@@ -109,7 +123,9 @@ class UserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   std::string starboard_version_;
   std::string os_name_and_version_;
   base::Optional<std::string> original_design_manufacturer_;
+#if SB_API_VERSION < 15
   SbSystemDeviceType device_type_ = kSbSystemDeviceTypeUnknown;
+#endif
   std::string device_type_string_;
   base::Optional<std::string> chipset_model_number_;
   base::Optional<std::string> model_year_;
@@ -122,6 +138,8 @@ class UserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   std::string evergreen_type_;
   std::string evergreen_file_type_;
   std::string evergreen_version_;
+  std::string firmware_version_details_;  // Only via Client Hints
+  std::string os_experience_;             // Only via Client Hints
 
   std::string cobalt_version_;
   std::string cobalt_build_version_number_;

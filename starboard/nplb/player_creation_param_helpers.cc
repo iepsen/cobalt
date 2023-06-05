@@ -92,14 +92,14 @@ AudioStreamInfo CreateAudioStreamInfo(SbMediaAudioCodec codec) {
       break;
     }
 #endif  // SB_API_VERSION >= 14
-#if SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
+#if SB_API_VERSION >= 15
     case kSbMediaAudioCodecIamf: {
       audio_stream_info.number_of_channels = 2;
       audio_stream_info.samples_per_second = 48000;
       audio_stream_info.bits_per_sample = 32;
       break;
     }
-#endif  // SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
+#endif  // SB_API_VERSION >= 15
   }
   return audio_stream_info;
 }
@@ -123,11 +123,13 @@ VideoStreamInfo CreateVideoStreamInfo(SbMediaVideoCodec codec) {
 }
 
 PlayerCreationParam CreatePlayerCreationParam(SbMediaAudioCodec audio_codec,
-                                              SbMediaVideoCodec video_codec) {
+                                              SbMediaVideoCodec video_codec,
+                                              SbPlayerOutputMode output_mode) {
   PlayerCreationParam creation_param;
 
   creation_param.audio_stream_info = CreateAudioStreamInfo(audio_codec);
   creation_param.video_stream_info = CreateVideoStreamInfo(video_codec);
+  creation_param.output_mode = output_mode;
 
   return creation_param;
 }

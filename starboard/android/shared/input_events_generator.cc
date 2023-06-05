@@ -95,6 +95,10 @@ std::unique_ptr<Event> CreateMoveEventWithKey(
 }
 
 float GetFlat(jobject input_device, int axis) {
+  if (input_device == NULL) {
+    return 0.0f;
+  }
+
   JniEnvExt* env = JniEnvExt::Get();
   ScopedLocalJavaRef<jobject> motion_range(env->CallObjectMethodOrAbort(
       input_device, "getMotionRange",
@@ -166,6 +170,8 @@ SbKey AInputEventToSbKey(GameActivityKeyEvent* event) {
       return kSbKeyHome;
     case AKEYCODE_MOVE_END:
       return kSbKeyEnd;
+    case AKEYCODE_SEARCH:
+      return kSbKeyBrowserSearch;
 
     // D-pad
     case AKEYCODE_DPAD_UP:
@@ -377,13 +383,17 @@ SbKey AInputEventToSbKey(GameActivityKeyEvent* event) {
     case AKEYCODE_Z:
       return static_cast<SbKey>(kSbKeyA + (keycode - AKEYCODE_A));
 
-    // Don't handle these keys so the OS can in a uniform manner.
+    // Required, but will not be used by the YouTube application.
     case AKEYCODE_VOLUME_UP:
+      return kSbKeyVolumeUp;
     case AKEYCODE_VOLUME_DOWN:
+      return kSbKeyVolumeDown;
     case AKEYCODE_MUTE:
+      return kSbKeyVolumeMute;
+
+    // Don't handle these keys so the OS can in a uniform manner.
     case AKEYCODE_BRIGHTNESS_UP:
     case AKEYCODE_BRIGHTNESS_DOWN:
-    case AKEYCODE_SEARCH:
     default:
       return kSbKeyUnknown;
   }
@@ -486,11 +496,6 @@ void PushKeyEvent(SbKey key,
                   SbWindow window,
                   GameActivityMotionEvent* android_event,
                   Events* events) {
-  if (key == kSbKeyUnknown) {
-    SB_NOTREACHED();
-    return;
-  }
-
   std::unique_ptr<SbInputData> data(new SbInputData());
   memset(data.get(), 0, sizeof(*data));
 
@@ -522,11 +527,6 @@ void PushKeyEvent(SbKey key,
                   SbWindow window,
                   GameActivityKeyEvent* android_event,
                   Events* events) {
-  if (key == kSbKeyUnknown) {
-    SB_NOTREACHED();
-    return;
-  }
-
   std::unique_ptr<SbInputData> data(new SbInputData());
   memset(data.get(), 0, sizeof(*data));
 
@@ -665,9 +665,6 @@ bool InputEventsGenerator::CreateInputEventsFromGameActivityEvent(
   }
 
   SbKey key = AInputEventToSbKey(android_event);
-  if (key == kSbKeyUnknown) {
-    return false;
-  }
 
   if (android_event->flags & AKEY_EVENT_FLAG_FALLBACK && IsDPadKey(key)) {
     // For fallback DPad keys, we flow into special processing to manage the
@@ -795,6 +792,14 @@ bool InputEventsGenerator::ProcessPointerEvent(
   return true;
 }
 
+jobject GetDevice(GameActivityMotionEvent* android_motion_event) {
+  int32_t device_id = android_motion_event->deviceId;
+  JniEnvExt* env = JniEnvExt::Get();
+  return env->CallStaticObjectMethodOrAbort(
+      "android/view/InputDevice", "getDevice", "(I)Landroid/view/InputDevice;",
+      device_id);
+}
+
 bool InputEventsGenerator::CreateInputEventsFromGameActivityEvent(
     GameActivityMotionEvent* android_event,
     Events* events) {
@@ -807,15 +812,18 @@ bool InputEventsGenerator::CreateInputEventsFromGameActivityEvent(
     return false;
   }
 
-  UpdateDeviceFlatMapIfNecessary(android_event);
-  ProcessJoyStickEvent(kLeftX, AMOTION_EVENT_AXIS_X, android_event, events);
-  ProcessJoyStickEvent(kLeftY, AMOTION_EVENT_AXIS_Y, android_event, events);
-  ProcessJoyStickEvent(kRightX, AMOTION_EVENT_AXIS_Z, android_event, events);
-  ProcessJoyStickEvent(kRightY, AMOTION_EVENT_AXIS_RZ, android_event, events);
+  ScopedLocalJavaRef<jobject> device(GetDevice(android_event));
+  if (device.Get() != NULL) {
+    UpdateDeviceFlatMapIfNecessary(android_event, device.Get());
+    ProcessJoyStickEvent(kLeftX, AMOTION_EVENT_AXIS_X, android_event, events);
+    ProcessJoyStickEvent(kLeftY, AMOTION_EVENT_AXIS_Y, android_event, events);
+    ProcessJoyStickEvent(kRightX, AMOTION_EVENT_AXIS_Z, android_event, events);
+    ProcessJoyStickEvent(kRightY, AMOTION_EVENT_AXIS_RZ, android_event, events);
 
-  // Remember the "hat" input values (dpad on the game controller) to help
-  // differentiate hat vs. stick fallback events.
-  UpdateHatValuesAndPossiblySynthesizeKeyEvents(android_event, events);
+    // Remember the "hat" input values (dpad on the game controller) to help
+    // differentiate hat vs. stick fallback events.
+    UpdateHatValuesAndPossiblySynthesizeKeyEvents(android_event, events);
+  }
 
   // Lie to Android and tell it that we did not process the motion event,
   // causing Android to synthesize dpad key events for us. When we handle
@@ -892,21 +900,17 @@ void InputEventsGenerator::UpdateHatValuesAndPossiblySynthesizeKeyEvents(
 }
 
 void InputEventsGenerator::UpdateDeviceFlatMapIfNecessary(
-    GameActivityMotionEvent* android_motion_event) {
+    GameActivityMotionEvent* android_motion_event,
+    jobject input_device) {
   int32_t device_id = android_motion_event->deviceId;
   if (device_flat_.find(device_id) != device_flat_.end()) {
     // |device_flat_| is already contains the device flat information.
     return;
   }
-
-  JniEnvExt* env = JniEnvExt::Get();
-  ScopedLocalJavaRef<jobject> input_device(env->CallStaticObjectMethodOrAbort(
-      "android/view/InputDevice", "getDevice", "(I)Landroid/view/InputDevice;",
-      device_id));
-  float flats[kNumAxes] = {GetFlat(input_device.Get(), AMOTION_EVENT_AXIS_X),
-                           GetFlat(input_device.Get(), AMOTION_EVENT_AXIS_Y),
-                           GetFlat(input_device.Get(), AMOTION_EVENT_AXIS_Z),
-                           GetFlat(input_device.Get(), AMOTION_EVENT_AXIS_RZ)};
+  float flats[kNumAxes] = {GetFlat(input_device, AMOTION_EVENT_AXIS_X),
+                           GetFlat(input_device, AMOTION_EVENT_AXIS_Y),
+                           GetFlat(input_device, AMOTION_EVENT_AXIS_Z),
+                           GetFlat(input_device, AMOTION_EVENT_AXIS_RZ)};
   device_flat_[device_id] = std::vector<float>(flats, flats + kNumAxes);
 }
 

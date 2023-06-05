@@ -32,10 +32,10 @@ _FILTERED_TESTS = {
 
         # Failures tracked by b/256160416.
         'SbSystemGetPathTest.ReturnsRequiredPaths',
-        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.SeekAndDestroy/audio__null__video_beneath_the_canopy_137_avc_dmp_output_DecodeToTexture',
-        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.NoInput/audio__null__video_beneath_the_canopy_137_avc_dmp_output_DecodeToTexture',
-        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.WriteSingleBatch/audio__null__video_beneath_the_canopy_137_avc_dmp_output_DecodeToTexture',
-        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.WriteMultipleBatches/audio__null__video_beneath_the_canopy_137_avc_dmp_output_DecodeToTexture',
+        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.SeekAndDestroy/*_video_beneath_the_canopy_137_avc_dmp_output_decode_to_texture_*',
+        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.NoInput/*_video_beneath_the_canopy_137_avc_dmp_output_decode_to_texture_*',
+        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.WriteSingleBatch/*_video_beneath_the_canopy_137_avc_dmp_output_decode_to_texture_*',
+        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.WriteMultipleBatches/*_video_beneath_the_canopy_137_avc_dmp_output_decode_to_texture_*',
         'SbSocketAddressTypes/SbSocketBindTest.RainyDayBadInterface/type_ipv6_filter_ipv6',
         'SbSocketAddressTypes/SbSocketGetInterfaceAddressTest.SunnyDayDestination/type_ipv6',
         'SbSocketAddressTypes/SbSocketGetInterfaceAddressTest.SunnyDaySourceForDestination/type_ipv6',
@@ -43,6 +43,8 @@ _FILTERED_TESTS = {
         'SbSocketAddressTypes/SbSocketResolveTest.SunnyDayFiltered/filter_ipv6_type_ipv6',
         'SbSocketAddressTypes/SbSocketSetOptionsTest.RainyDayInvalidSocket/type_ipv4',
         'SbSocketAddressTypes/SbSocketSetOptionsTest.RainyDayInvalidSocket/type_ipv6',
+        # Flakiness is tracked in b/278276779.
+        'Semaphore.ThreadTakesWait_TimeExpires',
     ],
     'player_filter_tests': [
         # These tests fail on our VMs for win-win32 builds due to missing

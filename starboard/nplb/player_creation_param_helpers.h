@@ -49,13 +49,13 @@ struct PlayerCreationParam {
 
     creation_param->drm_system = drm_system;
 
-#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#if SB_API_VERSION >= 15
     audio_stream_info.ConvertTo(&creation_param->audio_stream_info);
     video_stream_info.ConvertTo(&creation_param->video_stream_info);
-#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#else   // SB_API_VERSION >= 15
     audio_stream_info.ConvertTo(&creation_param->audio_sample_info);
     video_stream_info.ConvertTo(&creation_param->video_sample_info);
-#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#endif  // SB_API_VERSION >= 15
 
     creation_param->output_mode = output_mode;
   }
@@ -66,7 +66,8 @@ shared::starboard::media::AudioStreamInfo CreateAudioStreamInfo(
 shared::starboard::media::VideoStreamInfo CreateVideoStreamInfo(
     SbMediaVideoCodec codec);
 PlayerCreationParam CreatePlayerCreationParam(SbMediaAudioCodec audio_codec,
-                                              SbMediaVideoCodec video_codec);
+                                              SbMediaVideoCodec video_codec,
+                                              SbPlayerOutputMode output_mode);
 
 }  // namespace nplb
 }  // namespace starboard

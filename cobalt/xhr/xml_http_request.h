@@ -337,6 +337,7 @@ class XMLHttpRequestImpl
   // All members requiring initialization are grouped below.
   bool error_;
   bool is_cross_origin_;
+  network::CORSPolicy cors_policy_;
   bool is_data_url_;
   bool is_redirect_;
   net::URLFetcher::RequestType method_;
@@ -444,7 +445,7 @@ class XMLHttpRequestImpl
   bool sent_;
   web::EnvironmentSettings* const settings_;
   bool stop_timeout_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
   uint32 timeout_ms_;
   bool upload_complete_;
 

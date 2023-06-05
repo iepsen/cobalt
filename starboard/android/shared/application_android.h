@@ -22,10 +22,10 @@
 #include <vector>
 
 #include "game-activity/GameActivity.h"
-#include "starboard/android/shared/input_events_generator.h"
 #ifdef STARBOARD_INPUT_EVENTS_FILTER
-#include "starboard/android/shared/internal/input_events_filter.h"
+#include "internal/starboard/android/shared/internal/input_events_filter.h"
 #endif
+#include "starboard/android/shared/input_events_generator.h"
 #include "starboard/android/shared/jni_env_ext.h"
 #include "starboard/atomic.h"
 #include "starboard/common/condition_variable.h"
@@ -63,12 +63,12 @@ class ApplicationAndroid
     void* data;
   };
 
-#if SB_MODULAR_BUILD
+#if SB_API_VERSION >= 15
   ApplicationAndroid(ALooper* looper,
                      SbEventHandleCallback sb_event_handle_callback);
 #else
   explicit ApplicationAndroid(ALooper* looper);
-#endif  //  SB_MODULAR_BUILD
+#endif  //  SB_API_VERSION >= 15
   ~ApplicationAndroid() override;
 
   static ApplicationAndroid* Get() {
@@ -81,13 +81,8 @@ class ApplicationAndroid
   bool OnSearchRequested();
   void HandleDeepLink(const char* link_url);
   void SendTTSChangedEvent() {
-#if SB_API_VERSION >= 13
     Inject(new Event(kSbEventTypeAccessibilityTextToSpeechSettingsChanged,
                      nullptr, nullptr));
-#else
-    Inject(new Event(kSbEventTypeAccessiblityTextToSpeechSettingsChanged,
-                     nullptr, nullptr));
-#endif
   }
 
   void SendAndroidCommand(AndroidCommand::CommandType type, void* data);

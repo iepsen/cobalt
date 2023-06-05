@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "starboard/common/device_type.h"
 #include "starboard/common/log.h"
 #include "starboard/common/string.h"
 #include "starboard/shared/environment.h"
@@ -66,6 +67,12 @@ bool SbSystemGetProperty(SbSystemPropertyId property_id,
       return CopyStringAndTestIfSuccess(
           out_value, value_length,
           starboard::GetEnvironment("COBALT_LIMIT_AD_TRACKING").c_str());
+#endif
+
+#if SB_API_VERSION >= 15
+    case kSbSystemPropertyDeviceType:
+      return CopyStringAndTestIfSuccess(out_value, value_length,
+                                        starboard::kSystemDeviceTypeDesktopPC);
 #endif
 
     default:

@@ -14,6 +14,10 @@
 
 #include "starboard/system.h"
 
+#if SB_API_VERSION < 15
+
 SbSystemDeviceType SbSystemGetDeviceType() {
   return kSbSystemDeviceTypeAndroidTV;
 }
+
+#endif

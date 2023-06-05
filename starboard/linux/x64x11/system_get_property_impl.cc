@@ -16,6 +16,7 @@
 
 #include <string>
 
+#include "starboard/common/device_type.h"
 #include "starboard/common/log.h"
 #include "starboard/common/string.h"
 #include "starboard/linux/x64x11/system_properties.h"
@@ -33,10 +34,8 @@ const char kSystemIntegratorName[] = "SystemIntegratorName";
 
 #if SB_API_VERSION >= 14
 const char kModelYear[] = "2023";
-#elif SB_API_VERSION >= 13
+#else
 const char kModelYear[] = "2022";
-#elif SB_API_VERSION >= 12
-const char kModelYear[] = "2021";
 #endif  // SB_API_VERSION
 }  // namespace
 
@@ -120,6 +119,11 @@ bool GetSystemProperty(SbSystemPropertyId property_id,
       return CopyStringAndTestIfSuccess(
           out_value, value_length,
           GetEnvironment("COBALT_LIMIT_AD_TRACKING").c_str());
+#endif
+#if SB_API_VERSION >= 15
+    case kSbSystemPropertyDeviceType:
+      return CopyStringAndTestIfSuccess(out_value, value_length,
+                                        kSystemDeviceTypeDesktopPC);
 #endif
     default:
       SB_DLOG(WARNING) << __FUNCTION__

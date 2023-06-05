@@ -20,11 +20,8 @@ from starboard.tools.testing import test_filter
 class CobaltX64Configuration(cobalt_configuration.CobaltConfiguration):
   """Starboard Cobalt Evergreen x64 configuration."""
 
-  def WebdriverBenchmarksEnabled(self):
-    return True
-
   def GetTestFilters(self):
-    filters = super(CobaltX64Configuration, self).GetTestFilters()
+    filters = super().GetTestFilters()
     for target, tests in self.__FILTERED_TESTS.items():
       filters.extend(test_filter.TestFilter(target, test) for test in tests)
     return filters

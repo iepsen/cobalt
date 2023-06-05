@@ -106,8 +106,7 @@ class AudioDecoderTest
   AudioDecoderTest()
       : test_filename_(std::get<0>(GetParam())),
         using_stub_decoder_(std::get<1>(GetParam())),
-        dmp_reader_(ResolveTestFileName(test_filename_).c_str(),
-                    VideoDmpReader::kEnableReadOnDemand) {
+        dmp_reader_(test_filename_, VideoDmpReader::kEnableReadOnDemand) {
     SB_LOG(INFO) << "Testing " << test_filename_
                  << (using_stub_decoder_ ? " with stub audio decoder." : ".");
   }
@@ -646,7 +645,9 @@ TEST_P(AudioDecoderTest, MultipleInputs) {
 
 TEST_P(AudioDecoderTest, LimitedInput) {
   SbTime duration = kSbTimeSecond / 2;
+#if SB_API_VERSION < 15
   SbMediaSetAudioWriteDuration(duration);
+#endif  // SB_API_VERSION < 15
 
   ASSERT_TRUE(decoded_audios_.empty());
   int start_index = 0;
@@ -663,7 +664,9 @@ TEST_P(AudioDecoderTest, LimitedInput) {
 TEST_P(AudioDecoderTest, ContinuedLimitedInput) {
   constexpr int kMaxAccessUnitsToDecode = 256;
   SbTime duration = kSbTimeSecond / 2;
+#if SB_API_VERSION < 15
   SbMediaSetAudioWriteDuration(duration);
+#endif  // SB_API_VERSION < 15
 
   SbTime start = SbTimeGetMonotonicNow();
   int start_index = 0;

@@ -66,6 +66,26 @@ config("compiler_flags") {
       # Do not warn about unused function params.
       "-Wno-unused-parameter",
     ]
+
+    if (is_gold) {
+      cflags += [
+        # Don't generate an eh_frame and eh_frame_hdr section.
+        "-fno-asynchronous-unwind-tables",
+      ]
+    }
+  }
+
+  if (is_clang_16) {
+    cflags += [
+      # Do not warn about an implicit conversion from int to float
+      "-Wno-implicit-int-float-conversion",
+
+      # Do not warn about an implicit conversion from int to char16
+      "-Wno-implicit-int-conversion",
+
+      # Do not remove null pointer checks.
+      "-fno-delete-null-pointer-checks",
+    ]
   }
 
   if (!cobalt_fastbuild && (is_debug || is_devel)) {

@@ -32,9 +32,9 @@
 #include "starboard/media.h"
 #include "starboard/memory.h"
 #include "starboard/shared/starboard/media/media_util.h"
+#include "starboard/shared/starboard/player/filter/player_components.h"
 #include "starboard/shared/starboard/player/filter/stub_player_components_factory.h"
 #include "starboard/shared/starboard/player/filter/testing/test_util.h"
-#include "starboard/shared/starboard/player/filter/video_decoder_internal.h"
 #include "starboard/shared/starboard/player/job_queue.h"
 #include "starboard/shared/starboard/player/video_dmp_reader.h"
 #include "starboard/testing/fake_graphics_context_provider.h"
@@ -68,8 +68,7 @@ VideoDecoderTestFixture::VideoDecoderTestFixture(
       test_filename_(test_filename),
       output_mode_(output_mode),
       using_stub_decoder_(using_stub_decoder),
-      dmp_reader_(ResolveTestFileName(test_filename).c_str(),
-                  VideoDmpReader::kEnableReadOnDemand) {
+      dmp_reader_(test_filename, VideoDmpReader::kEnableReadOnDemand) {
   SB_DCHECK(job_queue_);
   SB_DCHECK(fake_graphics_context_provider_);
   SB_LOG(INFO) << "Testing " << test_filename_ << ", output mode "
@@ -83,7 +82,7 @@ void VideoDecoderTestFixture::Initialize() {
   ASSERT_TRUE(GetVideoInputBuffer(0)->video_sample_info().is_key_frame);
 
   SbPlayerOutputMode output_mode = output_mode_;
-  ASSERT_TRUE(VideoDecoder::OutputModeSupported(
+  ASSERT_TRUE(PlayerComponents::Factory::OutputModeSupported(
       output_mode, dmp_reader_.video_codec(), kSbDrmSystemInvalid));
 
   PlayerComponents::Factory::CreationParameters creation_parameters(

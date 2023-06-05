@@ -17,29 +17,29 @@
 #include <algorithm>
 
 #include "starboard/configuration.h"
-#include "starboard/shared/starboard/player/filter/video_decoder_internal.h"
+#include "starboard/shared/starboard/player/filter/player_components.h"
 #include "starboard/string.h"
 
 SbPlayerOutputMode SbPlayerGetPreferredOutputMode(
     const SbPlayerCreationParam* creation_param) {
-  using starboard::shared::starboard::player::filter::VideoDecoder;
+  using starboard::shared::starboard::player::filter::PlayerComponents;
 
   if (!creation_param) {
     SB_LOG(ERROR) << "creation_param cannot be NULL";
     return kSbPlayerOutputModeInvalid;
   }
 
-#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#if SB_API_VERSION >= 15
   const SbMediaAudioStreamInfo& audio_stream_info =
       creation_param->audio_stream_info;
   const SbMediaVideoStreamInfo& video_stream_info =
       creation_param->video_stream_info;
-#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#else   // SB_API_VERSION >= 15
   const SbMediaAudioSampleInfo& audio_stream_info =
       creation_param->audio_sample_info;
   const SbMediaVideoSampleInfo& video_stream_info =
       creation_param->video_sample_info;
-#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#endif  // SB_API_VERSION >= 15
 
   if (audio_stream_info.codec != kSbMediaAudioCodecNone &&
       !audio_stream_info.mime) {
@@ -66,8 +66,8 @@ SbPlayerOutputMode SbPlayerGetPreferredOutputMode(
 
   // Sub players must use decode-to-texture on Android.
   if (max_video_capabilities && strlen(max_video_capabilities) > 0) {
-    if (VideoDecoder::OutputModeSupported(kSbPlayerOutputModeDecodeToTexture,
-                                          codec, drm_system)) {
+    if (PlayerComponents::Factory::OutputModeSupported(
+            kSbPlayerOutputModeDecodeToTexture, codec, drm_system)) {
       return kSbPlayerOutputModeDecodeToTexture;
     }
     SB_NOTREACHED();
@@ -85,13 +85,13 @@ SbPlayerOutputMode SbPlayerGetPreferredOutputMode(
     std::swap(output_modes_to_check[0], output_modes_to_check[1]);
   }
 
-  if (VideoDecoder::OutputModeSupported(output_modes_to_check[0], codec,
-                                        drm_system)) {
+  if (PlayerComponents::Factory::OutputModeSupported(output_modes_to_check[0],
+                                                     codec, drm_system)) {
     return output_modes_to_check[0];
   }
 
-  if (VideoDecoder::OutputModeSupported(output_modes_to_check[1], codec,
-                                        drm_system)) {
+  if (PlayerComponents::Factory::OutputModeSupported(output_modes_to_check[1],
+                                                     codec, drm_system)) {
     return output_modes_to_check[1];
   }
 

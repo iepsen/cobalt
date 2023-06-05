@@ -31,9 +31,9 @@ SbPlayerOutputMode GetPreferredOutputMode(
 
 TEST(SbPlayerGetPreferredOutputModeTest, SunnyDay) {
   auto creation_param =
-      CreatePlayerCreationParam(kSbMediaAudioCodecAac, kSbMediaVideoCodecH264);
+      CreatePlayerCreationParam(kSbMediaAudioCodecAac, kSbMediaVideoCodecH264,
+                                kSbPlayerOutputModeInvalid);
 
-  creation_param.output_mode = kSbPlayerOutputModeInvalid;
   auto output_mode = GetPreferredOutputMode(creation_param);
   ASSERT_NE(output_mode, kSbPlayerOutputModeInvalid);
 
@@ -63,9 +63,9 @@ TEST(SbPlayerGetPreferredOutputModeTest, AllCodecs) {
     kSbMediaAudioCodecFlac,
     kSbMediaAudioCodecPcm,
 #endif  // SB_API_VERSION >= 14
-#if SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
+#if SB_API_VERSION >= 15
     kSbMediaAudioCodecIamf,
-#endif  // SB_API_VERSION >= SB_MEDIA_IAMF_SUPPORT_API_VERSION
+#endif  // SB_API_VERSION >= 15
   };
   const SbMediaVideoCodec kVideoCodecs[] = {
       kSbMediaVideoCodecNone,  kSbMediaVideoCodecH264,   kSbMediaVideoCodecH265,
@@ -82,8 +82,7 @@ TEST(SbPlayerGetPreferredOutputModeTest, AllCodecs) {
     for (SbMediaVideoCodec video_codec : kVideoCodecs) {
       for (SbPlayerOutputMode output_mode : kOutputModes) {
         auto creation_param =
-            CreatePlayerCreationParam(audio_codec, video_codec);
-        creation_param.output_mode = output_mode;
+            CreatePlayerCreationParam(audio_codec, video_codec, output_mode);
         GetPreferredOutputMode(creation_param);
       }
     }

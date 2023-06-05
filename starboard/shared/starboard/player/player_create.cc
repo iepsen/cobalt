@@ -26,8 +26,9 @@
 #include "starboard/shared/starboard/player/filter/filter_based_player_worker_handler.h"
 #include "starboard/shared/starboard/player/player_internal.h"
 #include "starboard/shared/starboard/player/player_worker.h"
+
 #if SB_PLAYER_ENABLE_VIDEO_DUMPER
-#include "starboard/shared/starboard/player/video_dmp_writer.h"
+#include SB_PLAYER_DMP_WRITER_INCLUDE_PATH
 #endif  // SB_PLAYER_ENABLE_VIDEO_DUMPER
 
 using ::starboard::shared::media_session::kPlaying;
@@ -58,17 +59,17 @@ SbPlayer SbPlayerCreate(SbWindow window,
     return kSbPlayerInvalid;
   }
 
-#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#if SB_API_VERSION >= 15
   const SbMediaAudioStreamInfo& audio_stream_info =
       creation_param->audio_stream_info;
   const SbMediaVideoStreamInfo& video_stream_info =
       creation_param->video_stream_info;
-#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#else   // SB_API_VERSION >= 15
   const SbMediaAudioSampleInfo& audio_stream_info =
       creation_param->audio_sample_info;
   const SbMediaVideoSampleInfo& video_stream_info =
       creation_param->video_sample_info;
-#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#endif  // SB_API_VERSION >= 15
 
   bool has_audio = audio_stream_info.codec != kSbMediaAudioCodecNone;
   bool has_video = video_stream_info.codec != kSbMediaVideoCodecNone;
@@ -219,7 +220,7 @@ SbPlayer SbPlayerCreate(SbWindow window,
 #if SB_PLAYER_ENABLE_VIDEO_DUMPER
   using ::starboard::shared::starboard::player::video_dmp::VideoDmpWriter;
   VideoDmpWriter::OnPlayerCreate(player, audio_codec, video_codec, drm_system,
-                                 audio_stream_info);
+                                 &audio_stream_info);
 #endif  // SB_PLAYER_ENABLE_VIDEO_DUMPER
 
   return player;

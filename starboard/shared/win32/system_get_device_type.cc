@@ -19,6 +19,10 @@
 #include "starboard/common/log.h"
 #include "starboard/shared/win32/wchar_utils.h"
 
+#if SB_API_VERSION < 15
+
 SbSystemDeviceType SbSystemGetDeviceType() {
   return kSbSystemDeviceTypeDesktopPC;
 }
+
+#endif

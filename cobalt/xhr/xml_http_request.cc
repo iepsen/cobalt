@@ -23,6 +23,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "cobalt/base/polymorphic_downcast.h"
 #include "cobalt/base/source_location.h"
@@ -36,6 +37,7 @@
 #include "cobalt/loader/fetch_interceptor_coordinator.h"
 #include "cobalt/loader/fetcher_factory.h"
 #include "cobalt/loader/url_fetcher_string_writer.h"
+#include "cobalt/network/network_module.h"
 #include "cobalt/script/global_environment.h"
 #include "cobalt/script/javascript_engine.h"
 #include "cobalt/web/context.h"
@@ -344,6 +346,12 @@ void XMLHttpRequest::TraceMembers(script::Tracer* tracer) {
 XMLHttpRequestImpl::XMLHttpRequestImpl(XMLHttpRequest* xhr)
     : error_(false),
       is_cross_origin_(false),
+      cors_policy_(xhr->environment_settings()
+                       ->context()
+                       ->fetcher_factory()
+                       ->network_module()
+                       ->network_delegate()
+                       ->cors_policy()),
       is_data_url_(false),
       is_redirect_(false),
       method_(net::URLFetcher::GET),
@@ -366,7 +374,7 @@ XMLHttpRequestImpl::XMLHttpRequestImpl(XMLHttpRequest* xhr)
       sent_(false),
       settings_(xhr->environment_settings()),
       stop_timeout_(false),
-      task_runner_(base::MessageLoop::current()->task_runner()),
+      task_runner_(base::ThreadTaskRunnerHandle::Get()),
       timeout_ms_(0),
       upload_complete_(false) {
   DCHECK(environment_settings());
@@ -534,7 +542,7 @@ void XMLHttpRequestImpl::SendIntercepted(
   if (will_destroy_current_message_loop_.load()) {
     return;
   }
-  if (task_runner_ != base::MessageLoop::current()->task_runner()) {
+  if (task_runner_ != base::ThreadTaskRunnerHandle::Get()) {
     task_runner_->PostTask(FROM_HERE,
                            base::BindOnce(&XMLHttpRequestImpl::SendIntercepted,
                                           AsWeakPtr(), std::move(response)));
@@ -602,7 +610,7 @@ void XMLHttpRequestImpl::SendFallback(
   if (will_destroy_current_message_loop_.load()) {
     return;
   }
-  if (task_runner_ != base::MessageLoop::current()->task_runner()) {
+  if (task_runner_ != base::ThreadTaskRunnerHandle::Get()) {
     task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&XMLHttpRequestImpl::SendFallback,
@@ -918,7 +926,7 @@ void XMLHttpRequestImpl::OnURLFetchResponseStarted(
   if (is_cross_origin_) {
     if (!loader::CORSPreflight::CORSCheck(*http_response_headers_,
                                           origin_.SerializedOrigin(),
-                                          with_credentials_)) {
+                                          with_credentials_, cors_policy_)) {
       HandleRequestError(XMLHttpRequest::kNetworkError);
       return;
     }
@@ -1177,7 +1185,7 @@ void XMLHttpRequestImpl::OnRedirect(const net::HttpResponseHeaders& headers) {
   // CORS check for the received response
   if (is_cross_origin_) {
     if (!loader::CORSPreflight::CORSCheck(headers, origin_.SerializedOrigin(),
-                                          with_credentials_)) {
+                                          with_credentials_, cors_policy_)) {
       HandleRequestError(XMLHttpRequest::kNetworkError);
       return;
     }
@@ -1416,6 +1424,7 @@ void XMLHttpRequestImpl::StartRequest(const std::string& request_body) {
   // Don't retry, let the caller deal with it.
   url_fetcher_->SetAutomaticallyRetryOn5xx(false);
   url_fetcher_->SetExtraRequestHeaders(request_headers_.ToString());
+  network_module->AddClientHintHeaders(*url_fetcher_);
 
   // We want to do cors check and preflight during redirects
   url_fetcher_->SetStopOnRedirect(true);
@@ -1452,6 +1461,7 @@ void XMLHttpRequestImpl::StartRequest(const std::string& request_body) {
             ->GetWindowOrWorkerGlobalScope()
             ->get_preflight_cache()));
     corspreflight_->set_headers(request_headers_);
+    corspreflight_->set_cors_policy(cors_policy_);
     // For cross-origin requests, don't send or save auth data / cookies unless
     // withCredentials was set.
     // To make a cross-origin request, add origin, referrer source, credentials,
@@ -1526,7 +1536,7 @@ void XMLHttpRequestImpl::PrepareForNewRequest() {
 void XMLHttpRequestImpl::StartURLFetcher(const SbTime max_artificial_delay,
                                          const int url_fetcher_generation) {
   if (max_artificial_delay > 0) {
-    base::MessageLoop::current()->task_runner()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&XMLHttpRequestImpl::StartURLFetcher, base::Unretained(this),
                    0, url_fetcher_generation_),

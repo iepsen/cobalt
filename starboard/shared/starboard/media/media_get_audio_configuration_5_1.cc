@@ -16,12 +16,19 @@
 
 #include "starboard/media.h"
 
+#if SB_API_VERSION >= 15
+#error File media_get_audio_configuration_5_1.cc is deprecated, \
+    consider using media_get_audio_configuration.cc instead.
+#endif  // SB_API_VERSION >= 15
+
 bool SbMediaGetAudioConfiguration(
     int output_index,
     SbMediaAudioConfiguration* out_configuration) {
   if (output_index != 0 || out_configuration == NULL) {
     return false;
   }
+
+  *out_configuration = {};
 
   out_configuration->index = 0;
   out_configuration->connector = kSbMediaAudioConnectorNone;

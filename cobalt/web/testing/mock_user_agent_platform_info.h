@@ -40,9 +40,11 @@ class MockUserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   base::Optional<std::string> original_design_manufacturer() const override {
     return optional_empty_string_;
   }
+#if SB_API_VERSION < 15
   SbSystemDeviceType device_type() const override {
     return kSbSystemDeviceTypeUnknown;
   }
+#endif
   const std::string& device_type_string() const override {
     return empty_string_;
   }
@@ -73,6 +75,10 @@ class MockUserAgentPlatformInfo : public web::UserAgentPlatformInfo {
   const std::string& evergreen_version() const override {
     return empty_string_;
   }
+  const std::string& firmware_version_details() const override {
+    return empty_string_;
+  }
+  const std::string& os_experience() const override { return empty_string_; }
   const std::string& cobalt_version() const override { return empty_string_; }
   const std::string& cobalt_build_version_number() const override {
     return empty_string_;

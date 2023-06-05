@@ -13,7 +13,22 @@
 # limitations under the License.
 
 config("platform_configuration") {
-  ldflags = []
+  ldflags = [
+    "--build-id",
+    "--gc-sections",
+    "-X",
+    "-v",
+    "-eh-frame-hdr",
+    "--fini=__cxa_finalize",
+    "-shared",
+    "-L$clang_base_path",
+    "-L/usr/lib",
+    "-L/lib",
+    "-nostdlib",
+    "--whole-archive",
+    "--no-whole-archive",
+    "-u GetEvergreenSabiString",
+  ]
 
   cflags = [
     "-ffunction-sections",
@@ -32,7 +47,7 @@ config("platform_configuration") {
 
   cflags_cc = [
     "-nostdinc++",
-    "-std=c++14",
+    "-std=c++17",
   ]
 
   defines = [
@@ -128,6 +143,13 @@ config("platform_configuration") {
       "-Wno-shift-op-parentheses",
       "-Wno-shorten-64-to-32",
       "-fno-use-cxa-atexit",
+    ]
+  }
+
+  if (is_clang_16) {
+    cflags += [
+      # Do not remove null pointer checks.
+      "-fno-delete-null-pointer-checks",
     ]
   }
 

@@ -18,8 +18,9 @@
 #include <utility>
 
 #include "starboard/common/log.h"
+
 #if SB_PLAYER_ENABLE_VIDEO_DUMPER
-#include "starboard/shared/starboard/player/video_dmp_writer.h"
+#include SB_PLAYER_DMP_WRITER_INCLUDE_PATH
 #endif  // SB_PLAYER_ENABLE_VIDEO_DUMPER
 
 namespace {
@@ -112,11 +113,11 @@ void SbPlayerPrivate::SetBounds(int z_index,
   // TODO: Wait until a frame is rendered with the updated bounds.
 }
 
-#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#if SB_API_VERSION >= 15
 void SbPlayerPrivate::GetInfo(SbPlayerInfo* out_player_info) {
-#else   // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#else   // SB_API_VERSION >= 15
 void SbPlayerPrivate::GetInfo(SbPlayerInfo2* out_player_info) {
-#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#endif  // SB_API_VERSION >= 15
   SB_DCHECK(out_player_info != NULL);
 
   starboard::ScopedLock lock(mutex_);

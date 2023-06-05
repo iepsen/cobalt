@@ -28,6 +28,7 @@ import sys
 
 from cobalt.black_box_tests import black_box_tests
 from cobalt.black_box_tests.threaded_web_server import ThreadedWebServer
+from starboard.tools import config
 
 sys.path.append(
     os.path.join(
@@ -43,16 +44,15 @@ class DebuggerCommandError(Exception):
   """Exception when an error response is received for a command."""
 
   def __init__(self, error):
-    code = '[{}] '.format(error['code']) if 'code' in error else ''
-    super(DebuggerCommandError, self).__init__(code + error['message'])
+    code = f"[{error['code']}] " if 'code' in error else ''
+    super().__init__(code + error['message'])
 
 
 class DebuggerEventError(Exception):
   """Exception when an unexpected event is received."""
 
   def __init__(self, expected, actual):
-    super(DebuggerEventError,
-          self).__init__('Waiting for {} but got {}'.format(expected, actual))
+    super().__init__(f'Waiting for {expected} but got {actual}')
 
 
 class JavaScriptError(Exception):
@@ -63,7 +63,7 @@ class JavaScriptError(Exception):
     ex = exception_details.get('exception', {})
     fallback = ex.get('className', 'Unknown error') + ' (No description)'
     msg = ex.get('description', fallback)
-    super(JavaScriptError, self).__init__(msg)
+    super().__init__(msg)
 
 
 class DebuggerConnection(object):
@@ -130,10 +130,10 @@ class DebuggerConnection(object):
     while command_id not in self.responses:
       try:
         self._receive_message()
-      except websocket.WebSocketTimeoutException:
+      except websocket.WebSocketTimeoutException as e:
         method = self.commands[command_id]['method']
         raise DebuggerCommandError(
-            {'message': 'Timeout waiting for response to ' + method})
+            {'message': 'Timeout waiting for response to ' + method}) from e
     self.commands.pop(command_id)
     return self.responses.pop(command_id)
 
@@ -147,7 +147,7 @@ class DebuggerConnection(object):
     # "Debugger.scriptParsed" events get sent as artifacts of the debugger
     # backend implementation running its own injected code, so they are ignored
     # unless that's what we're waiting for.
-    allow_script_parsed = (method == 'Debugger.scriptParsed')
+    allow_script_parsed = method == 'Debugger.scriptParsed'
 
     # Pop already-received events from the event queue.
     def _next_event():
@@ -165,8 +165,8 @@ class DebuggerConnection(object):
         break
       try:
         self._receive_message()
-      except websocket.WebSocketTimeoutException:
-        raise DebuggerEventError(method, 'None (timeout)')
+      except websocket.WebSocketTimeoutException as e:
+        raise DebuggerEventError(method, 'None (timeout)') from e
     if method != event['method']:
       raise DebuggerEventError(method, event['method'])
     return event
@@ -216,13 +216,13 @@ class WebDebuggerTest(black_box_tests.BlackBoxTestCase):
   """Test interaction with the web debugger over a WebSocket."""
 
   def set_up_with(self, cm):
-    val = cm.__enter__()
+    val = cm.__enter__()  # pylint: disable=unnecessary-dunder-call
     self.addCleanup(cm.__exit__, None, None, None)
     return val
 
   def setUp(self):
-    cobalt_vars = self.cobalt_config.GetVariables(self.launcher_params.config)
-    if not cobalt_vars['enable_debugger']:
+    is_gold_config = self.launcher_params.config == config.Config.GOLD
+    if is_gold_config:
       self.skipTest('DevTools is disabled on this platform')
 
     self.server = self.set_up_with(
@@ -600,7 +600,7 @@ class WebDebuggerTest(black_box_tests.BlackBoxTestCase):
     # (replace all children of <div#B>)
     inner_html = "<div id='D'>\\n</div>"
     self.debugger.evaluate_js('b = document.getElementById("B");'
-                              'b.innerHTML = "%s"' % inner_html)
+                              f'b.innerHTML = "{inner_html}"')
     removed_event = self.debugger.wait_event('DOM.childNodeRemoved')
     self.assertEqual(moved_span_b1['nodeId'], removed_event['params']['nodeId'])
     inserted_event = self.debugger.wait_event('DOM.childNodeInserted')
@@ -896,6 +896,7 @@ class WebDebuggerTest(black_box_tests.BlackBoxTestCase):
         [
             'asyncBreak',
             'promiseThen',
+            'promiseTimeout',
         ],
         [
             'waitPromise',
@@ -909,6 +910,7 @@ class WebDebuggerTest(black_box_tests.BlackBoxTestCase):
         [
             'asyncBreak',
             'asyncAwait',
+            'promiseTimeout',
         ],
         [
             'asyncAwait',

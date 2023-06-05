@@ -1297,10 +1297,13 @@ class GTEST_API_ GTestLog {
 };
 
 #if !defined(GTEST_LOG_)
-
+#if GTEST_OS_STARBOARD
+#define GTEST_LOG_ SB_LOG
+#else
 # define GTEST_LOG_(severity) \
     ::testing::internal::GTestLog(::testing::internal::GTEST_##severity, \
                                   __FILE__, __LINE__).GetStream()
+#endif
 
 inline void LogToStderr() {}
 #if GTEST_OS_STARBOARD
@@ -1555,7 +1558,10 @@ class ThreadLocal {
         [](void* value) { delete static_cast<T*>(value); });
     SB_DCHECK(key_ != kSbThreadLocalKeyInvalid);
   }
-  explicit ThreadLocal(const T& value) : ThreadLocal() { set(value); }
+  explicit ThreadLocal(const T& value) : ThreadLocal() {
+    default_value_ = value;
+    set(value);
+  }
   ~ThreadLocal() {
     SbThreadDestroyLocalKey(key_);
   }
@@ -1570,13 +1576,14 @@ class ThreadLocal {
     if (ptr) {
       return ptr;
     } else {
-      T* new_value = new T();
+      T* new_value = new T(default_value_);
       bool is_set = SbThreadSetLocalValue(key_, new_value);
       SB_CHECK(is_set);
       return new_value;
     }
   }
 
+  T default_value_;
   SbThreadLocalKey key_;
 };
 

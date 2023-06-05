@@ -47,12 +47,13 @@ _TESTS_FAILED_REGEX = re.compile(r"^\[  FAILED  \] (.*) tests?, listed below:")
 _SINGLE_TEST_FAILED_REGEX = re.compile(r"^\[  FAILED  \] (.*)")
 
 _CRASHPAD_TARGET = "crashpad_handler"
+_NATIVE_CRASHPARD_TARGET = "native_target/crashpad_handler"
 _LOADER_TARGET = "elf_loader_sandbox"
 
 
 def _EnsureBuildDirectoryExists(path):
   if not os.path.exists(path):
-    raise ValueError("'{}' does not exist.".format(path))
+    raise ValueError(f"'{path}' does not exist.")
 
 
 def _FilterTests(target_list, filters, config_name):
@@ -177,8 +178,7 @@ class TestLauncher(object):
       self.launcher.Kill()
       logging.info("Launcher killed")
     except Exception:  # pylint: disable=broad-except
-      sys.stderr.write("Error while killing {}:\n".format(
-          self.launcher.target_name))
+      sys.stderr.write(f"Error while killing {self.launcher.target_name}:\n")
       traceback.print_exc(file=sys.stderr)
 
   def Join(self):
@@ -192,8 +192,7 @@ class TestLauncher(object):
       return_code = self.launcher.Run()
       logging.info("Finished running launcher")
     except Exception:  # pylint: disable=broad-except
-      sys.stderr.write("Error while running {}:\n".format(
-          self.launcher.target_name))
+      sys.stderr.write(f"Error while running {self.launcher.target_name}:\n")
       traceback.print_exc(file=sys.stderr)
 
     with self.return_code_lock:
@@ -433,8 +432,8 @@ class TestRunner(object):
       test_params.append("--gtest_filter=" + gtest_filter_value)
 
     if shard_count is not None:
-      test_params.append("--gtest_total_shards={}".format(shard_count))
-      test_params.append("--gtest_shard_index={}".format(shard_index))
+      test_params.append(f"--gtest_total_shards={shard_count}")
+      test_params.append(f"--gtest_shard_index={shard_index}")
 
     # Path to where the test results XML will be created (if applicable).
     # For on-device testing, this is w.r.t on device storage.
@@ -464,25 +463,27 @@ class TestRunner(object):
          (self.log_xml_results or self.xml_output_dir) else "disabled"))
     if self.log_xml_results:
       out_path = MakeLauncher().GetDeviceOutputPath()
-      xml_filename = "{}_testoutput.xml".format(target_name)
+      # The filename is used by MH to deduce the target name.
+      xml_filename = f"{target_name}_testoutput.xml"
       if out_path:
         test_result_xml_path = os.path.join(out_path, xml_filename)
       else:
         test_result_xml_path = xml_filename
-      test_params.append("--gtest_output=xml:{}".format(test_result_xml_path))
+      test_params.append(f"--gtest_output=xml:{test_result_xml_path}")
       logging.info(("Xml results for this test will "
                     "be logged to '%s'."), test_result_xml_path)
     elif self.xml_output_dir:
-      # Have gtest create and save a test result xml
       xml_output_subdir = os.path.join(self.xml_output_dir, target_name)
       try:
         os.makedirs(xml_output_subdir)
-      except OSError:
-        pass
-      test_result_xml_path = os.path.join(xml_output_subdir, "sponge_log.xml")
+      except OSError as ose:
+        logging.warning("Unable to create xml output directory: %s", ose)
+      # The filename is used by GitHub actions to deduce the target name.
+      test_result_xml_path = os.path.join(xml_output_subdir,
+                                          f"{target_name}.xml")
       logging.info("Xml output for this test will be saved to: %s",
                    test_result_xml_path)
-      test_params.append("--gtest_output=xml:%s" % (test_result_xml_path))
+      test_params.append(f"--gtest_output=xml:{test_result_xml_path}")
     logging.info("XML test result path: %s", test_result_xml_path)
 
     # Turn off color codes from output to make it easy to parse
@@ -504,7 +505,7 @@ class TestRunner(object):
 
     dump_params = " ARGS:" + " ".join(test_params) if test_params else ""
     dump_env = " ENV VARS: " + ";".join(
-        "{}={}".format(k, v) for k, v in env.items()) if env else ""
+        f"{k}={v}" for k, v in env.items()) if env else ""
     # Output either the name of the test target or the specific test case
     # being run.
     # pylint: disable=g-long-ternary
@@ -515,7 +516,7 @@ class TestRunner(object):
     sys.stdout.write("\n")
 
     if test_params:
-      sys.stdout.write(" {}\n".format(test_params))
+      sys.stdout.write(f" {test_params}\n")
     test_reader.Start()
     logging.info("Starting test launcher")
     test_launcher.Start()
@@ -777,9 +778,13 @@ class TestRunner(object):
       # The loader is not built with the same platform configuration as our
       # tests so we need to build it separately.
       if self.loader_platform:
+        target_list = [_LOADER_TARGET]
+        if self.loader_platform.startswith("android"):
+          target_list.append(_NATIVE_CRASHPARD_TARGET)
+        else:
+          target_list.append(_CRASHPAD_TARGET)
         build_tests.BuildTargets(
-            [_LOADER_TARGET, _CRASHPAD_TARGET], self.loader_out_directory,
-            self.dry_run,
+            target_list, self.loader_out_directory, self.dry_run,
             extra_flags + [os.getenv("TEST_RUNNER_PLATFORM_BUILD_FLAGS", "")])
       build_tests.BuildTargets(
           self.test_targets, self.out_directory, self.dry_run,
@@ -788,7 +793,7 @@ class TestRunner(object):
     except subprocess.CalledProcessError as e:
       result = False
       sys.stderr.write("Error occurred during building.\n")
-      sys.stderr.write("{}\n".format(e))
+      sys.stderr.write(f"{e}\n")
 
     return result
 
@@ -916,7 +921,7 @@ def main():
       "--xml_output_dir",
       help="If defined, results will be saved as xml files in given directory."
       " Output for each test suite will be in it's own subdirectory and file:"
-      " <xml_output_dir>/<test_suite_name>/sponge_log.xml")
+      " <xml_output_dir>/<test_suite_name>/<test_suite_name>.xml")
   arg_parser.add_argument(
       "-l",
       "--log_xml_results",

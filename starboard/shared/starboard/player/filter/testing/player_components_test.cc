@@ -24,7 +24,6 @@
 #include "starboard/media.h"
 #include "starboard/player.h"
 #include "starboard/shared/starboard/player/filter/testing/test_util.h"
-#include "starboard/shared/starboard/player/filter/video_decoder_internal.h"
 #include "starboard/shared/starboard/player/job_queue.h"
 #include "starboard/shared/starboard/player/video_dmp_reader.h"
 #include "starboard/testing/fake_graphics_context_provider.h"
@@ -76,13 +75,11 @@ class PlayerComponentsTest
   void SetUp() override {
     if (audio_filename_.length() > 0) {
       audio_reader_.reset(new VideoDmpReader(
-          ResolveTestFileName(audio_filename_.c_str()).c_str(),
-          VideoDmpReader::kEnableReadOnDemand));
+          audio_filename_.c_str(), VideoDmpReader::kEnableReadOnDemand));
     }
     if (video_filename_.length() > 0) {
       video_reader_.reset(new VideoDmpReader(
-          ResolveTestFileName(video_filename_.c_str()).c_str(),
-          VideoDmpReader::kEnableReadOnDemand));
+          video_filename_.c_str(), VideoDmpReader::kEnableReadOnDemand));
     }
 
     scoped_ptr<PlayerComponents::Factory> factory =
@@ -689,8 +686,7 @@ vector<PlayerComponentsTestParam> GetSupportedCreationParameters() {
 
   // Filter too short dmp files, as the tests need at least 4s of data.
   for (auto iter = audio_files.begin(); iter != audio_files.end();) {
-    VideoDmpReader audio_dmp_reader(ResolveTestFileName(*iter).c_str(),
-                                    VideoDmpReader::kEnableReadOnDemand);
+    VideoDmpReader audio_dmp_reader(*iter, VideoDmpReader::kEnableReadOnDemand);
     if (audio_dmp_reader.audio_duration() < 5 * kSbTimeSecond) {
       iter = audio_files.erase(iter);
     } else {
@@ -698,9 +694,8 @@ vector<PlayerComponentsTestParam> GetSupportedCreationParameters() {
     }
   }
   for (auto iter = video_params.begin(); iter != video_params.end();) {
-    VideoDmpReader video_dmp_reader(
-        ResolveTestFileName(std::get<0>(*iter)).c_str(),
-        VideoDmpReader::kEnableReadOnDemand);
+    VideoDmpReader video_dmp_reader(std::get<0>(*iter),
+                                    VideoDmpReader::kEnableReadOnDemand);
     if (video_dmp_reader.video_duration() < 5 * kSbTimeSecond) {
       iter = video_params.erase(iter);
     } else {
@@ -720,15 +715,15 @@ vector<PlayerComponentsTestParam> GetSupportedCreationParameters() {
       << " tests added. It may take too long time to run and result in timeout";
 
   for (size_t i = 0; i < audio_files.size(); i++) {
-    if (VideoDecoder::OutputModeSupported(kSbPlayerOutputModeDecodeToTexture,
-                                          kSbMediaVideoCodecNone,
-                                          kSbDrmSystemInvalid)) {
+    if (PlayerComponents::Factory::OutputModeSupported(
+            kSbPlayerOutputModeDecodeToTexture, kSbMediaVideoCodecNone,
+            kSbDrmSystemInvalid)) {
       supported_parameters.push_back(std::make_tuple(
           audio_files[i], "", kSbPlayerOutputModeDecodeToTexture));
     }
-    if (VideoDecoder::OutputModeSupported(kSbPlayerOutputModePunchOut,
-                                          kSbMediaVideoCodecNone,
-                                          kSbDrmSystemInvalid)) {
+    if (PlayerComponents::Factory::OutputModeSupported(
+            kSbPlayerOutputModePunchOut, kSbMediaVideoCodecNone,
+            kSbDrmSystemInvalid)) {
       supported_parameters.push_back(
           std::make_tuple(audio_files[i], "", kSbPlayerOutputModePunchOut));
     }

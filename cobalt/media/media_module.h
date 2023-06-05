@@ -35,6 +35,7 @@
 #include "cobalt/render_tree/resource_provider.h"
 #include "cobalt/system_window/system_window.h"
 #include "starboard/common/mutex.h"
+#include "starboard/player.h"
 #include "third_party/chromium/media/base/media_log.h"
 
 namespace cobalt {
@@ -122,6 +123,11 @@ class MediaModule : public WebMediaPlayerFactory,
   bool suspended_ = false;
 
   bool allow_batched_sample_write_ = false;
+
+#if SB_API_VERSION >= 15
+  SbTime audio_write_duration_local_ = kSbPlayerWriteDurationLocal;
+  SbTime audio_write_duration_remote_ = kSbPlayerWriteDurationRemote;
+#endif  // SB_API_VERSION >= 15
 
   DecoderBufferAllocator decoder_buffer_allocator_;
 };

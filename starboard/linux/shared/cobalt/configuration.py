@@ -17,6 +17,8 @@ from cobalt.build import cobalt_configuration
 from starboard.tools.testing import test_filter
 
 _FILTERED_TESTS = {
+    # Tracked by b/185820828
+    'net_unittests': ['SpdyNetworkTransactionTest.SpdyBasicAuth',],
     'base_unittests': [
         # Fails when run in a sharded configuration: b/233108722, b/216774170
         'TaskQueueSelectorTest.TestHighestPriority',
@@ -65,21 +67,17 @@ class CobaltLinuxConfiguration(cobalt_configuration.CobaltConfiguration):
 
   def __init__(  # pylint:disable=useless-super-delegation
       self, platform_configuration, application_name, application_directory):
-    super(CobaltLinuxConfiguration,
-          self).__init__(platform_configuration, application_name,
-                         application_directory)
-
-  def WebdriverBenchmarksEnabled(self):
-    return True
+    super().__init__(platform_configuration, application_name,
+                     application_directory)
 
   def GetTestFilters(self):
-    filters = super(CobaltLinuxConfiguration, self).GetTestFilters()
+    filters = super().GetTestFilters()
     for target, tests in _FILTERED_TESTS.items():
       filters.extend(test_filter.TestFilter(target, test) for test in tests)
     return filters
 
   def GetWebPlatformTestFilters(self):
-    filters = super(CobaltLinuxConfiguration, self).GetWebPlatformTestFilters()
+    filters = super().GetWebPlatformTestFilters()
     filters.extend([
         # These tests are timing-sensitive, and are thus flaky on slower builds
         test_filter.TestFilter(

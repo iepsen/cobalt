@@ -32,7 +32,9 @@ COPY ./list_python_processes.py /list_python_processes.py
 # Install deps via chocolatey.
 RUN iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'));`
     mkdir C:\choco-cache;`
-    choco install -y -c C:\choco-cache python3 -ia '/quiet InstallAllUsers=1 PrependPath=1 TargetDir="C:\Python3"';`
+    # Note: We pinned python 3.11.0 version here because 3.11.2 has a regression
+    # where the install arguments like TargetDir were being ignored.
+    choco install -y -c C:\choco-cache python3 --version 3.11.0 -ia '/quiet InstallAllUsers=1 PrependPath=1 TargetDir="C:\Python3"';`
     choco install -y -c C:\choco-cache winflexbison3 --params '/InstallDir:C:\bison';`
     choco install -y -c C:\choco-cache ninja;`
     choco install -y -c C:\choco-cache nodejs-lts;`
@@ -55,6 +57,7 @@ RUN mkdir C:\pip-cache;`
     git config --global core.filemode false;`
     git config --global core.preloadindex true;`
     git config --global core.fscache true;`
+    git config --global --add safe.directory C:/code;`
     # Registry changes to enable long filesystem paths.
     reg add 'HKLM\SYSTEM\CurrentControlSet\Control\FileSystem' /v LongPathsEnabled /t REG_DWORD /reg:64 /d 1 /f;`
     reg add 'HKLM\SYSTEM\CurrentControlSet\Control\FileSystem' /v LongPathsEnabled /t REG_DWORD /d 1 /f;`

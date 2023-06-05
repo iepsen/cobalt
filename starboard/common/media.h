@@ -23,6 +23,7 @@ namespace starboard {
 
 const char* GetMediaAudioCodecName(SbMediaAudioCodec codec);
 const char* GetMediaVideoCodecName(SbMediaVideoCodec codec);
+const char* GetMediaAudioConnectorName(SbMediaAudioConnector connector);
 const char* GetMediaPrimaryIdName(SbMediaPrimaryId primary_id);
 const char* GetMediaTransferIdName(SbMediaTransferId transfer_id);
 const char* GetMediaMatrixIdName(SbMediaMatrixId matrix_id);
@@ -64,11 +65,11 @@ std::ostream& operator<<(std::ostream& os,
 std::ostream& operator<<(std::ostream& os,
                          const SbMediaAudioSampleInfo& sample_info);
 
-#if SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#if SB_API_VERSION >= 15
 std::ostream& operator<<(std::ostream& os,
                          const SbMediaVideoStreamInfo& stream_info);
 std::ostream& operator<<(std::ostream& os,
                          const SbMediaAudioStreamInfo& stream_info);
-#endif  // SB_API_VERSION >= SB_MEDIA_ENHANCED_AUDIO_API_VERSION
+#endif  // SB_API_VERSION >= 15
 
 #endif  // STARBOARD_COMMON_MEDIA_H_

@@ -18,6 +18,7 @@
 
 #include "starboard/android/shared/jni_env_ext.h"
 #include "starboard/android/shared/jni_utils.h"
+#include "starboard/common/device_type.h"
 #include "starboard/common/log.h"
 #include "starboard/common/string.h"
 
@@ -32,6 +33,7 @@ namespace {
 
 const char kFriendlyName[] = "Android";
 const char kUnknownValue[] = "unknown";
+
 // This is a format string template and the %s is meant to be replaced by
 // the Android release version number (e.g. "7.0" for Nougat).
 const char kPlatformNameFormat[] =
@@ -161,6 +163,11 @@ bool SbSystemGetProperty(SbSystemPropertyId property_id,
       return CopyStringAndTestIfSuccess(out_value, value_length,
                                         limit_ad_tracking_enabled ? "1" : "0");
     }
+#endif
+#if SB_API_VERSION >= 15
+    case kSbSystemPropertyDeviceType:
+      return CopyStringAndTestIfSuccess(out_value, value_length,
+                                        starboard::kSystemDeviceTypeAndroidTV);
 #endif
     default:
       SB_DLOG(WARNING) << __FUNCTION__

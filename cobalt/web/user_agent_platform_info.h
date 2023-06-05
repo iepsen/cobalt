@@ -32,7 +32,9 @@ class UserAgentPlatformInfo {
   virtual const std::string& starboard_version() const = 0;
   virtual const std::string& os_name_and_version() const = 0;
   virtual base::Optional<std::string> original_design_manufacturer() const = 0;
+#if SB_API_VERSION < 15
   virtual SbSystemDeviceType device_type() const = 0;
+#endif
   virtual const std::string& device_type_string() const = 0;
   virtual base::Optional<std::string> chipset_model_number() const = 0;
   virtual base::Optional<std::string> model_year() const = 0;
@@ -45,6 +47,8 @@ class UserAgentPlatformInfo {
   virtual const std::string& evergreen_type() const = 0;
   virtual const std::string& evergreen_file_type() const = 0;
   virtual const std::string& evergreen_version() const = 0;
+  virtual const std::string& firmware_version_details() const = 0;
+  virtual const std::string& os_experience() const = 0;
 
   virtual const std::string& cobalt_version() const = 0;
   virtual const std::string& cobalt_build_version_number() const = 0;

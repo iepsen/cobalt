@@ -128,14 +128,12 @@ source_set("starboard_headers_only") {
     "atomic.h",
     "audio_sink.h",
     "byte_swap.h",
-    "character.h",
     "condition_variable.h",
     "configuration.h",
     "configuration_constants.h",
     "cpu_features.h",
     "decode_target.h",
     "directory.h",
-    "double.h",
     "drm.h",
     "egl.h",
     "event.h",
@@ -166,7 +164,7 @@ source_set("starboard_headers_only") {
   ]
 
   if (is_internal_build) {
-    public_deps = [ "//starboard/private:private_starboard_headers" ]
+    public_deps = [ "//internal/starboard/private:private_starboard_headers" ]
   }
 }
 
