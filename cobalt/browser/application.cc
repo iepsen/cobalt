@@ -24,6 +24,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/statistics_recorder.h"
+#include "base/metrics/user_metrics.h"
 #include "base/optional.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -59,11 +60,13 @@
 #include "cobalt/browser/device_authentication.h"
 #include "cobalt/browser/memory_settings/auto_mem_settings.h"
 #include "cobalt/browser/memory_tracker/tool.h"
+#include "cobalt/browser/metrics/cobalt_metrics_services_manager.h"
 #include "cobalt/browser/switches.h"
 #include "cobalt/browser/user_agent_platform_info.h"
 #include "cobalt/browser/user_agent_string.h"
 #include "cobalt/cache/cache.h"
 #include "cobalt/configuration/configuration.h"
+#include "cobalt/h5vcc/h5vcc_crash_log.h"
 #include "cobalt/loader/image/image_decoder.h"
 #include "cobalt/math/size.h"
 #include "cobalt/script/javascript_engine.h"
@@ -73,6 +76,7 @@
 #include "cobalt/system_window/input_event.h"
 #include "cobalt/trace_event/scoped_trace_to_file.h"
 #include "cobalt/watchdog/watchdog.h"
+#include "components/metrics/metrics_service.h"
 #include "starboard/common/device_type.h"
 #include "starboard/common/system_property.h"
 #include "starboard/configuration.h"
@@ -599,34 +603,27 @@ void AddCrashHandlerAnnotations(const UserAgentPlatformInfo& platform_info) {
   }
 }
 
-void AddCrashHandlerApplicationState(base::ApplicationState state) {
-  auto crash_handler_extension =
-      static_cast<const CobaltExtensionCrashHandlerApi*>(
-          SbSystemGetExtension(kCobaltExtensionCrashHandlerName));
-  if (!crash_handler_extension) {
-    DLOG(INFO) << "No crash handler extension, not sending application state.";
-    return;
-  }
-
+void AddCrashLogApplicationState(base::ApplicationState state) {
   std::string application_state = std::string(GetApplicationStateString(state));
   application_state.push_back('\0');
 
-  if (crash_handler_extension->version > 1) {
-    if (crash_handler_extension->SetString("application_state",
-                                           application_state.c_str())) {
-      DLOG(INFO) << "Sent application state to crash handler.";
-      return;
+  auto crash_handler_extension =
+      static_cast<const CobaltExtensionCrashHandlerApi*>(
+          SbSystemGetExtension(kCobaltExtensionCrashHandlerName));
+  if (crash_handler_extension && crash_handler_extension->version >= 2) {
+    if (!crash_handler_extension->SetString("application_state",
+                                            application_state.c_str())) {
+      LOG(ERROR) << "Could not send application state to crash handler.";
     }
+    return;
   }
-  DLOG(ERROR) << "Could not send application state to crash handler.";
+
+  // Crash handler is not supported, fallback to crash log dictionary.
+  h5vcc::CrashLogDictionary::GetInstance()->SetString("application_state",
+                                                      application_state);
 }
 
 }  // namespace
-
-// Helper stub to disable histogram tracking in StatisticsRecorder
-struct RecordCheckerStub : public base::RecordHistogramChecker {
-  bool ShouldRecord(uint64_t) const override { return false; }
-};
 
 // Static user logs
 ssize_t Application::available_memory_ = 0;
@@ -691,11 +688,6 @@ Application::Application(const base::Closure& quit_closure, bool should_preload,
   std::string language = base::GetSystemLanguage();
   base::LocalizedStrings::GetInstance()->Initialize(language);
 
-  // Disable histogram tracking before TaskScheduler creates StatisticsRecorder
-  // instances.
-  auto record_checker = std::make_unique<RecordCheckerStub>();
-  base::StatisticsRecorder::SetRecordChecker(std::move(record_checker));
-
   // A one-per-process task scheduler is needed for usage of APIs in
   // base/post_task.h which will be used by some net APIs like
   // URLRequestContext;
@@ -705,6 +697,9 @@ Application::Application(const base::Closure& quit_closure, bool should_preload,
   persistent_settings_ =
       std::make_unique<persistent_storage::PersistentSettings>(
           kPersistentSettingsJson);
+
+  // Initialize telemetry/metrics.
+  InitMetrics();
 
   // Initializes Watchdog.
   watchdog::Watchdog* watchdog =
@@ -727,7 +722,6 @@ Application::Application(const base::Closure& quit_closure, bool should_preload,
   unconsumed_deep_link_ = GetInitialDeepLink();
   DLOG(INFO) << "Initial deep link: " << unconsumed_deep_link_;
 
-  storage::StorageManager::Options storage_manager_options;
   network::NetworkModule::Options network_module_options;
   // Create the main components of our browser.
   BrowserModule::Options options;
@@ -764,7 +758,7 @@ Application::Application(const base::Closure& quit_closure, bool should_preload,
 
 #if defined(ENABLE_DEBUG_COMMAND_LINE_SWITCHES)
   if (command_line->HasSwitch(browser::switches::kNullSavegame)) {
-    storage_manager_options.savegame_options.factory =
+    network_module_options.storage_manager_options.savegame_options.factory =
         &storage::SavegameFake::Create;
   }
 
@@ -798,14 +792,16 @@ Application::Application(const base::Closure& quit_closure, bool should_preload,
   } else {
     partition_key = base::GetApplicationKey(initial_url);
   }
-  storage_manager_options.savegame_options.id = partition_key;
+  network_module_options.storage_manager_options.savegame_options.id =
+      partition_key;
 
   base::Optional<std::string> default_key =
       base::GetApplicationKey(GURL(kDefaultURL));
   if (command_line->HasSwitch(
           browser::switches::kForceMigrationForStoragePartitioning) ||
       partition_key == default_key) {
-    storage_manager_options.savegame_options.fallback_to_default_id = true;
+    network_module_options.storage_manager_options.savegame_options
+        .fallback_to_default_id = true;
   }
 
   // User can specify an extra search path entry for files loaded via file://.
@@ -906,15 +902,11 @@ Application::Application(const base::Closure& quit_closure, bool should_preload,
   options.web_module_options.collect_unload_event_time_callback = base::Bind(
       &Application::CollectUnloadEventTimingInfo, base::Unretained(this));
 
-  account_manager_.reset(new account::AccountManager());
-
-  storage_manager_.reset(new storage::StorageManager(storage_manager_options));
-
   cobalt::browser::UserAgentPlatformInfo platform_info;
 
   network_module_.reset(new network::NetworkModule(
       CreateUserAgentString(platform_info), GetClientHintHeaders(platform_info),
-      storage_manager_.get(), &event_dispatcher_, network_module_options));
+      &event_dispatcher_, network_module_options));
 
   AddCrashHandlerAnnotations(platform_info);
 
@@ -938,15 +930,15 @@ Application::Application(const base::Closure& quit_closure, bool should_preload,
                                                      update_check_delay_sec));
   }
 #endif
-  browser_module_.reset(new BrowserModule(
-      initial_url,
-      (should_preload ? base::kApplicationStateConcealed
-                      : base::kApplicationStateStarted),
-      &event_dispatcher_, account_manager_.get(), network_module_.get(),
+  browser_module_.reset(
+      new BrowserModule(initial_url,
+                        (should_preload ? base::kApplicationStateConcealed
+                                        : base::kApplicationStateStarted),
+                        &event_dispatcher_, network_module_.get(),
 #if SB_IS(EVERGREEN)
-      updater_module_.get(),
+                        updater_module_.get(),
 #endif
-      options));
+                        options));
 
   UpdateUserAgent();
 
@@ -1056,6 +1048,10 @@ Application::~Application() {
   // for the debugger to land.
   watchdog::Watchdog::DeleteInstance();
 
+  // Explicitly delete the global metrics services manager here to give it
+  // an opportunity to clean up late logs and persist metrics.
+  metrics::CobaltMetricsServicesManager::DeleteInstance();
+
 #if defined(ENABLE_DEBUGGER) && defined(STARBOARD_ALLOWS_MEMORY_TRACKING)
   memory_tracker_tool_.reset(NULL);
 #endif  // defined(ENABLE_DEBUGGER) && defined(STARBOARD_ALLOWS_MEMORY_TRACKING)
@@ -1084,6 +1080,8 @@ Application::~Application() {
   event_dispatcher_.RemoveEventCallback(
       base::DateTimeConfigurationChangedEvent::TypeId(),
       on_date_time_configuration_changed_event_callback_);
+  browser_module_.reset();
+  network_module_.reset();
 }
 
 void Application::Start(SbTimeMonotonic timestamp) {
@@ -1212,7 +1210,7 @@ void Application::OnApplicationEvent(SbEventType event_type,
     case kSbEventTypeStop:
       LOG(INFO) << "Got quit event.";
       if (watchdog) watchdog->UpdateState(base::kApplicationStateStopped);
-      AddCrashHandlerApplicationState(base::kApplicationStateStopped);
+      AddCrashLogApplicationState(base::kApplicationStateStopped);
       Quit();
       LOG(INFO) << "Finished quitting.";
       break;
@@ -1287,7 +1285,7 @@ void Application::OnApplicationEvent(SbEventType event_type,
       return;
   }
   if (watchdog) watchdog->UpdateState(browser_module_->GetApplicationState());
-  AddCrashHandlerApplicationState(browser_module_->GetApplicationState());
+  AddCrashLogApplicationState(browser_module_->GetApplicationState());
 }
 
 void Application::OnWindowSizeChangedEvent(const base::Event* event) {
@@ -1547,6 +1545,30 @@ void Application::DispatchDeepLinkIfNotConsumed() {
   if (browser_module_) {
     browser_module_->SetDeepLinkTimestamp(timestamp);
   }
+}
+
+void Application::InitMetrics() {
+  // Must be called early as it initializes global state which is then read by
+  // all threads without synchronization.
+  // RecordAction task runner must be called before metric initialization.
+  base::SetRecordActionTaskRunner(base::ThreadTaskRunnerHandle::Get());
+  metrics_services_manager_ =
+      metrics::CobaltMetricsServicesManager::GetInstance();
+  // Before initializing metrics manager, set any persisted settings like if
+  // it's enabled or upload interval.
+  bool is_metrics_enabled = persistent_settings_->GetPersistentSettingAsBool(
+      metrics::kMetricEnabledSettingName, false);
+  metrics_services_manager_->SetUploadInterval(
+      persistent_settings_->GetPersistentSettingAsInt(
+          metrics::kMetricEventIntervalSettingName, 300));
+  metrics_services_manager_->ToggleMetricsEnabled(is_metrics_enabled);
+  // Metric recording state initialization _must_ happen before we bootstrap
+  // otherwise we crash.
+  metrics_services_manager_->GetMetricsService()
+      ->InitializeMetricsRecordingState();
+  // UpdateUploadPermissions bootstraps the whole metric reporting, scheduling,
+  // and uploading cycle.
+  metrics_services_manager_->UpdateUploadPermissions(is_metrics_enabled);
 }
 
 }  // namespace browser

@@ -7,9 +7,7 @@ import("gni/angle.gni")
 if (angle_has_build) {
   import("//build/config/linux/pkg_config.gni")
   import("//build/config/ui.gni")
-  if (!is_starboard) {
-    import("//testing/libfuzzer/fuzzer_test.gni")
-  }
+  import("//testing/libfuzzer/fuzzer_test.gni")
 
   if (is_android) {
     # android/rules.gni can only be imported for Android targets
@@ -1374,7 +1372,7 @@ if (!is_component_build && is_android && symbol_level != 0) {
 }
 
 if (build_with_chromium && !is_component_build && is_android &&
-    current_toolchain == default_toolchain) {
+    is_starboardized_toolchain) {
   # Package ANGLE libraries
   angle_apk("angle_chromium_apk") {
     package_name = "com.chromium.angle"

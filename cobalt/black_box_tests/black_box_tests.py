@@ -46,9 +46,7 @@ _EVERGREEN_COMPATIBLE_CONFIGS = [
     # TODO(b/283788059): enable when there are GitHub jobs to run integration
     # and Black Box Tests on evergreen-arm-hardfp.
     #'evergreen-arm/devel',
-    # TODO(b/283144901): enable when the Starboard 16 binaries are released for
-    # Evergreen.
-    #'evergreen-x64/devel',
+    'evergreen-x64/devel',
 ]
 
 _PORT_SELECTION_RETRY_LIMIT = 10
@@ -87,6 +85,7 @@ _TESTS_NO_SIGNAL = [
     'service_worker_fetch_main_resource_test',
     'service_worker_fetch_test',
     'service_worker_message_test',
+    'service_worker_post_message_test',
     'service_worker_test',
     'service_worker_persist_test',
     'soft_mic_platform_service_test',
@@ -96,6 +95,7 @@ _TESTS_NO_SIGNAL = [
     'web_worker_test',
     'worker_csp_test',
     'worker_load_test',
+    'worker_post_message_test',
 ]
 # These are very different and require a custom config + proxy
 _WPT_TESTS = [

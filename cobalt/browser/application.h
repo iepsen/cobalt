@@ -24,10 +24,10 @@
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
-#include "cobalt/account/account_manager.h"
 #include "cobalt/base/event_dispatcher.h"
 #include "cobalt/browser/browser_module.h"
 #include "cobalt/browser/memory_tracker/tool.h"
+#include "cobalt/browser/metrics/cobalt_metrics_services_manager.h"
 #include "cobalt/network/network_module.h"
 #include "cobalt/persistent_storage/persistent_settings.h"
 #include "cobalt/system_window/system_window.h"
@@ -95,12 +95,6 @@ class Application {
 
   // A conduit for system events.
   base::EventDispatcher event_dispatcher_;
-
-  // Account manager.
-  std::unique_ptr<account::AccountManager> account_manager_;
-
-  // Storage manager used by the network module below.
-  std::unique_ptr<storage::StorageManager> storage_manager_;
 
   // Sets up the network component for requesting internet resources.
   std::unique_ptr<network::NetworkModule> network_module_;
@@ -230,6 +224,15 @@ class Application {
   // Dispatch events for deep links.
   void DispatchDeepLink(const char* link, SbTimeMonotonic timestamp);
   void DispatchDeepLinkIfNotConsumed();
+
+
+  // Initializes all code necessary to start telemetry/metrics gathering and
+  // reporting. See go/cobalt-telemetry.
+  void InitMetrics();
+
+  // Reference to the current metrics manager, the highest level control point
+  // for metrics/telemetry.
+  metrics::CobaltMetricsServicesManager* metrics_services_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(Application);
 };

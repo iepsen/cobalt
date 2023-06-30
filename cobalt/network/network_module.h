@@ -30,6 +30,7 @@
 #include "cobalt/network/url_request_context.h"
 #include "cobalt/network/url_request_context_getter.h"
 #include "cobalt/persistent_storage/persistent_settings.h"
+#include "cobalt/storage/storage_manager.h"
 #include "net/base/static_cookie_policy.h"
 #include "url/gurl.h"
 #if defined(DIAL_SERVER)
@@ -38,26 +39,34 @@
 #include "net/dial/dial_service.h"
 #endif
 #include "net/url_request/http_user_agent_settings.h"
+#include "starboard/common/atomic.h"
 
 namespace base {
 class WaitableEvent;
 }  // namespace base
 
 namespace cobalt {
-
-namespace storage {
-class StorageManager;
-}  // namespace storage
-
 namespace network {
 
+// Used to differentiate type of network call for Client Hint Headers.
+// Values correspond to bit masks against |enable_client_hint_headers_flags_|.
+enum ClientHintHeadersCallType : int32_t {
+  kCallTypeLoader = (1u << 0),
+  kCallTypeMedia = (1u << 1),
+  kCallTypePost = (1u << 2),
+  kCallTypePreflight = (1u << 3),
+  kCallTypeUpdater = (1u << 4),
+  kCallTypeXHR = (1u << 5),
+};
+
+// Holds bit mask flag, read into |enable_client_hint_headers_flags_|.
 const char kClientHintHeadersEnabledPersistentSettingsKey[] =
     "clientHintHeadersEnabled";
 
 class NetworkSystem;
 // NetworkModule wraps various networking-related components such as
 // a URL request context. This is owned by BrowserModule.
-class NetworkModule {
+class NetworkModule : public base::MessageLoop::DestructionObserver {
  public:
   struct Options {
     Options()
@@ -76,6 +85,7 @@ class NetworkModule {
     std::string custom_proxy;
     SbTime max_network_delay;
     persistent_storage::PersistentSettings* persistent_settings;
+    storage::StorageManager::Options storage_manager_options;
   };
 
   // Simple constructor intended to be used only by tests.
@@ -84,7 +94,6 @@ class NetworkModule {
   // Constructor for production use.
   NetworkModule(const std::string& user_agent_string,
                 const std::vector<std::string>& client_hint_headers,
-                storage::StorageManager* storage_manager,
                 base::EventDispatcher* event_dispatcher,
                 const Options& options = Options());
   ~NetworkModule();
@@ -104,7 +113,9 @@ class NetworkModule {
   scoped_refptr<base::SequencedTaskRunner> task_runner() const {
     return thread_->task_runner();
   }
-  storage::StorageManager* storage_manager() const { return storage_manager_; }
+  storage::StorageManager* storage_manager() const {
+    return storage_manager_.get();
+  }
   network_bridge::CookieJar* cookie_jar() const { return cookie_jar_.get(); }
   network_bridge::PostSender GetPostSender() const;
 #if defined(DIAL_SERVER)
@@ -116,9 +127,15 @@ class NetworkModule {
 
   void SetEnableQuic(bool enable_quic);
 
-  // Adds the Client Hint Headers to the provided URLFetcher.
-  // It is conditional on kClientHintHeadersEnabledPersistentSettingsKey != 0.
-  void AddClientHintHeaders(net::URLFetcher& url_fetcher) const;
+  // Checks persistent settings to determine if Client Hint Headers are enabled.
+  void SetEnableClientHintHeadersFlagsFromPersistentSettings();
+
+  // Adds the Client Hint Headers to the provided URLFetcher if enabled.
+  void AddClientHintHeaders(net::URLFetcher& url_fetcher,
+                            ClientHintHeadersCallType call_type) const;
+
+  // From base::MessageLoop::DestructionObserver.
+  void WillDestroyCurrentMessageLoop() override;
 
  private:
   void Initialize(const std::string& user_agent_string,
@@ -127,7 +144,8 @@ class NetworkModule {
   std::unique_ptr<network_bridge::NetPoster> CreateNetPoster();
 
   std::vector<std::string> client_hint_headers_;
-  storage::StorageManager* storage_manager_;
+  starboard::atomic_int32_t enable_client_hint_headers_flags_;
+  std::unique_ptr<storage::StorageManager> storage_manager_;
   std::unique_ptr<base::Thread> thread_;
   std::unique_ptr<URLRequestContext> url_request_context_;
   scoped_refptr<URLRequestContextGetter> url_request_context_getter_;

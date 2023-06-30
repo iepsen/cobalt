@@ -22,6 +22,7 @@
 #include "base/trace_event/trace_event.h"
 #include "cobalt/base/instance_counter.h"
 #include "cobalt/media/base/drm_system.h"
+#include "cobalt/media/base/sbplayer_pipeline.h"
 #include "cobalt/media/player/web_media_player_proxy.h"
 #include "cobalt/media/progressive/data_source_reader.h"
 #include "cobalt/media/progressive/demuxer_extension_wrapper.h"
@@ -118,6 +119,7 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
         get_decode_target_graphics_context_provider_func,
     WebMediaPlayerClient* client, WebMediaPlayerDelegate* delegate,
     bool allow_resume_after_suspend, bool allow_batched_sample_write,
+    bool force_punch_out_by_default,
 #if SB_API_VERSION >= 15
     SbTime audio_write_duration_local, SbTime audio_write_duration_remote,
 #endif  // SB_API_VERSION >= 15
@@ -130,6 +132,7 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
       delegate_(delegate),
       allow_resume_after_suspend_(allow_resume_after_suspend),
       allow_batched_sample_write_(allow_batched_sample_write),
+      force_punch_out_by_default_(force_punch_out_by_default),
       proxy_(new WebMediaPlayerProxy(main_loop_->task_runner(), this)),
       media_log_(media_log),
       is_local_source_(false),
@@ -145,14 +148,15 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
   media_log_->AddEvent<::media::MediaLogEvent::kWebMediaPlayerCreated>();
 
   pipeline_thread_.Start();
-  pipeline_ =
-      Pipeline::Create(interface, window, pipeline_thread_.task_runner(),
-                       get_decode_target_graphics_context_provider_func,
-                       allow_resume_after_suspend_, allow_batched_sample_write_,
+  pipeline_ = new SbPlayerPipeline(
+      interface, window, pipeline_thread_.task_runner(),
+      get_decode_target_graphics_context_provider_func,
+      allow_resume_after_suspend_, allow_batched_sample_write_,
+      force_punch_out_by_default_,
 #if SB_API_VERSION >= 15
-                       audio_write_duration_local, audio_write_duration_remote,
+      audio_write_duration_local, audio_write_duration_remote,
 #endif  // SB_API_VERSION >= 15
-                       media_log_, decode_target_provider_.get());
+      media_log_, decode_target_provider_.get());
 
   // Also we want to be notified of |main_loop_| destruction.
   main_loop_->AddDestructionObserver(this);
@@ -807,7 +811,9 @@ void WebMediaPlayerImpl::StartPipeline(const GURL& url) {
 
   state_.starting = true;
 
-  pipeline_->SetDecodeToTextureOutputMode(client_->PreferDecodeToTexture());
+  if (client_->PreferDecodeToTexture()) {
+    pipeline_->SetPreferredOutputModeToDecodeToTexture();
+  }
   pipeline_->Start(
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::SetDrmSystemReadyCB),
       BIND_TO_RENDER_LOOP(
@@ -827,7 +833,9 @@ void WebMediaPlayerImpl::StartPipeline(::media::Demuxer* demuxer) {
 
   state_.starting = true;
 
-  pipeline_->SetDecodeToTextureOutputMode(client_->PreferDecodeToTexture());
+  if (client_->PreferDecodeToTexture()) {
+    pipeline_->SetPreferredOutputModeToDecodeToTexture();
+  }
   pipeline_->Start(
       demuxer, BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::SetDrmSystemReadyCB),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineEnded),
