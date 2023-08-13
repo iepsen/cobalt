@@ -18,17 +18,17 @@
 #include <string>
 #include <vector>
 
-#include "internal/starboard/xb1/shared/internal_shims.h"
 #include "starboard/common/device_type.h"
 #include "starboard/common/log.h"
 #include "starboard/common/string.h"
 #include "starboard/configuration_constants.h"
-#include "starboard/keyboxes/xbox/system_properties.h"
 #include "starboard/memory.h"
 #include "starboard/shared/uwp/application_uwp.h"
 #include "starboard/shared/uwp/keys.h"
 #include "starboard/shared/win32/wchar_utils.h"
 #include "starboard/system.h"
+#include "starboard/xb1/shared/internal_shims.h"
+#include "starboard/xb1/system_properties.h"
 
 using starboard::shared::win32::platformStringToString;
 using Windows::Security::ExchangeActiveSyncProvisioning::
@@ -69,9 +69,6 @@ const char kUnknownModelYear[] = "2020";
 // Chipset for unidentified device forms.
 const char kUnknownChipset[] = "UwpUnknown";
 
-// XOR key for certification secret.
-const char kRandomKey[] = "27539";
-
 bool CopyStringAndTestIfSuccess(char* out_value,
                                 int value_length,
                                 const char* from_value) {
@@ -91,15 +88,6 @@ bool CopyStringAndTestIfSuccess(char* out_value,
                                                      from_value_str);
   delete from_value_str;
   return result;
-}
-
-bool StartsWith(const std::string& str, const char* prefix) {
-  size_t len = strlen(prefix);
-  if (str.size() < len) {
-    return false;
-  }
-
-  return 0 == str.compare(0, len, prefix);
 }
 
 const std::size_t kOsVersionSize = 128;
@@ -267,15 +255,6 @@ bool GetAppXVersion(char* out_value, int value_length) {
                  << version.Build << '.' << version.Revision;
   return CopyStringAndTestIfSuccess(out_value, value_length,
                                     version_string.str().c_str());
-}
-
-size_t XorString(char* dest, const char* src) {
-  size_t keyLen = strlen(kRandomKey);
-  size_t ret = strlen(src);
-  for (size_t i = 0; i < ret; i++) {
-    dest[i] = src[i] ^ (kRandomKey[i % keyLen]);
-  }
-  return ret;
 }
 
 std::string GetAdvertisingId() {

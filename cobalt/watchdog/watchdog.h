@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "base/values.h"
 #include "cobalt/base/application_state.h"
@@ -81,6 +82,7 @@ class Watchdog : public Singleton<Watchdog> {
   bool InitializeStub();
   void Uninitialize();
   std::string GetWatchdogFilePath();
+  std::vector<std::string> GetWatchdogClientNames();
   void UpdateState(base::ApplicationState state);
   bool Register(std::string name, std::string description,
                 base::ApplicationState monitor_state,
@@ -89,7 +91,8 @@ class Watchdog : public Singleton<Watchdog> {
   bool Unregister(const std::string& name, bool lock = true);
   bool Ping(const std::string& name);
   bool Ping(const std::string& name, const std::string& info);
-  std::string GetWatchdogViolations(bool clear = true);
+  std::string GetWatchdogViolations(
+      const std::vector<std::string>& clients = {}, bool clear = true);
   bool GetPersistentSettingWatchdogEnable();
   void SetPersistentSettingWatchdogEnable(bool enable_watchdog);
   bool GetPersistentSettingWatchdogCrash();

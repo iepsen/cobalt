@@ -55,7 +55,6 @@
 #include "cobalt/ui_navigation/scroll_engine/scroll_engine.h"
 #include "cobalt/web/csp_delegate_factory.h"
 #include "cobalt/web/navigator_ua_data.h"
-#include "nb/memory_scope.h"
 #include "starboard/atomic.h"
 #include "starboard/common/string.h"
 #include "starboard/configuration.h"
@@ -621,6 +620,10 @@ void BrowserModule::Navigate(const GURL& url_reference) {
   }
 
   options.debugger_state = debugger_state_.get();
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableWebDebugger)) {
+    options.enable_debugger = true;
+  }
 #endif  // ENABLE_DEBUGGER
 
   // Pass down this callback from to Web module.
@@ -1419,9 +1422,14 @@ std::unique_ptr<debug::DebugClient> BrowserModule::CreateDebugClient(
       FROM_HERE,
       base::Bind(&BrowserModule::GetDebugDispatcherInternal,
                  base::Unretained(this), base::Unretained(&debug_dispatcher)));
-  DCHECK(debug_dispatcher);
-  return std::unique_ptr<debug::DebugClient>(
-      new debug::DebugClient(debug_dispatcher, delegate));
+  if (debug_dispatcher) {
+    return std::unique_ptr<debug::DebugClient>(
+        new debug::DebugClient(debug_dispatcher, delegate));
+  } else {
+    LOG(ERROR)
+        << "Debugger connected but debugging the main web module is disabled.";
+    return nullptr;
+  }
 }
 
 void BrowserModule::GetDebugDispatcherInternal(

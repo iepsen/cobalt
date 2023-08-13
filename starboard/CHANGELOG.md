@@ -14,7 +14,21 @@ A description of all changes currently in the experimental Starboard version
 can be found in the comments of the "Experimental Feature Defines" section of
 [configuration.h](configuration.h).
 
+## Version 16
+
+### Removed SbByteSwapS16, SbByteSwapS32, SbByteSwapS64, SbByteSwapU16, SbByteSwapU32, and SbByteSwapU64
+The APIs defined in `starboard/byte_swap.h` are no longer used and have been
+deprecated.
+
 ## Version 15
+
+### SbMemoryReporter is no longer used
+
+`SbMemoryReporter` defined in `starboard/memory_reporter.h`` is no longer used
+and is considered deprecated. It will be removed in upcoming Starboard versions.
+The corresponding `SbMemoryAllocateNoReport` and `SbMemoryDeallocateNoReport`
+are also deprecated.
+
 ### Removed version suffixes of SbPlayer functions and structures
 Renamed SbPlayerInfo2 to SbPlayerInfo, SbPlayerSeek2() to SbPlayerSeek(),and
 SbPlayerGetInfo2() to SbPlayerGetInfo(), as the version suffixes are no longer

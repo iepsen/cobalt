@@ -57,7 +57,6 @@ is_gold = build_type == "gold"
 assert(is_debug || is_devel || is_qa || is_gold)
 
 # Set some variables we never want to change.
-sb_allows_memory_tracking = !is_gold
 host_byteorder = "little"
 is_official_build = false  # Chromium's build files expect this to be set.
 is_component_build = false
@@ -91,13 +90,22 @@ import("//starboard/build/platform_path.gni")
 # TODO(b/272790873): Set host_cpu to x86 for 32 bit builds.
 if (target_cpu == "x86" || target_cpu == "arm") {
   _host_toolchain_cpu = "x86"
+} else if (target_cpu == "arm64") {
+  # TODO(b/292107465): Set host_cpu to x64 for arm64 builds.
+  _host_toolchain_cpu = "x64"
 } else {
   _host_toolchain_cpu = host_cpu
 }
 host_toolchain = "//starboard/build/toolchain/$host_os:$_host_toolchain_cpu"
 
 if (build_with_separate_cobalt_toolchain) {
-  cobalt_toolchain = "//starboard/build/toolchain/linux:clang_lld"
+  # TODO(b/294450490): decide a way to set cobalt_toolchain for modular builds for all platforms.
+  # we'll need more conditionals for other platforms.
+  if (host_os == "win") {
+    cobalt_toolchain = "//$starboard_path/toolchain:cobalt"
+  } else {
+    cobalt_toolchain = "//starboard/build/toolchain:clang"
+  }
   starboard_toolchain = "//$starboard_path/toolchain:starboard"
 } else {
   cobalt_toolchain = "//$starboard_path/toolchain:target"
@@ -109,12 +117,18 @@ import("//starboard/build/config/toolchain_variables.gni")
 import("//$starboard_path/platform_configuration/configuration.gni")
 import("//starboard/build/config/build_assertions.gni")
 
+# TODO(b/295399926) Clean up flag by moving to modular/helper_var.gni
+sb_is_modular = sb_is_evergreen || build_with_separate_cobalt_toolchain
+
 declare_args() {
   use_tsan = getenv("USE_TSAN") == 1
 }
 
-_use_asan_default = (is_debug || is_devel) && (is_linux || is_mac) &&
-                    is_clang && !sb_is_evergreen && !using_old_compiler
+_use_asan_default =
+    (is_debug || is_devel) && (is_linux || is_mac) && is_clang &&
+    (!sb_is_evergreen || build_with_separate_cobalt_toolchain) &&
+    !using_old_compiler
+
 declare_args() {
   use_asan = (_use_asan_default || getenv("USE_ASAN") == 1) && !use_tsan
 }
@@ -313,6 +327,88 @@ template("copy") {
   }
 }
 
+template("evergreen_loader") {
+  # Add additional evergreen_loader target for every native target.
+  original_target_name = invoker.original_target_name
+  shared_data_deps = invoker.data_deps
+  shared_data_deps += [ "//third_party/icu:icudata" ]
+  shared_data_deps += [
+    ":copy_loader_app_lib${original_target_name}",
+    "//starboard/loader_app:copy_loader_app_content",
+  ]
+  if (cobalt_font_package == "empty") {
+    shared_data_deps += [ "//cobalt/content/fonts:copy_font_data" ]
+  } else {
+    shared_data_deps += [
+      "//cobalt/content/fonts:copy_fonts",
+      "//cobalt/content/fonts:fonts_xml",
+    ]
+  }
+  shared_library(target_name) {
+    forward_variables_from(invoker, [ "testonly" ])
+    if (has_pedantic_warnings) {
+      configs += [ "//starboard/build/config:pedantic_warnings" ]
+    }
+
+    configs += [ "//$starboard_path/platform_configuration" ]
+    if (!has_pedantic_warnings) {
+      configs += [ "//starboard/build/config:no_pedantic_warnings" ]
+    }
+
+    sources = [ "//starboard/elf_loader/sandbox.cc" ]
+    configs += [ "//starboard/elf_loader:elf_loader_config" ]
+
+    deps = [
+      ":copy_loader_app_lib${original_target_name}",
+      "//cobalt/content/fonts:copy_font_data",
+      "//starboard",
+      "//starboard/elf_loader:constants",
+      "//starboard/elf_loader:elf_loader",
+      "//starboard/elf_loader:evergreen_info",
+      "//starboard/elf_loader:sabi_string",
+      "//starboard/loader_app:copy_loader_app_content",
+    ]
+
+    if (!sb_is_evergreen_compatible) {
+      deps += [ "//third_party/crashpad/wrapper:wrapper_stub" ]
+    }
+  }
+  if (separate_install_targets_for_bundling) {
+    import("//starboard/build/config/bundle_content.gni")
+    bundle_content(
+        "copy_loader_app_lib${original_target_name}_bundle_content") {
+      forward_variables_from(invoker, [ "testonly" ])
+
+      bundle_name = target_name
+      bundle_deps = shared_data_deps
+    }
+  }
+  copy("copy_loader_app_lib${original_target_name}") {
+    install_content = true
+    if (target_cpu == "arm" && arm_float_abi == "softfp") {
+      sources = [ "$root_out_dir/../evergreen-$target_cpu-${arm_float_abi}_$build_type/lib${original_target_name}.so" ]
+    } else if (target_cpu == "arm64") {
+      sources = [ "$root_out_dir/../evergreen-$target_cpu_$build_type/install/lib/libcobalt.so" ]
+    }
+    outputs = [ "$sb_static_contents_output_data_dir/app/cobalt/lib/lib${original_target_name}.so" ]
+  }
+  install_target(original_target_name + "_evergreen_loader_install") {
+    forward_variables_from(invoker, [ "testonly" ])
+    installable_target_name = original_target_name + "_evergreen_loader"
+    type = "shared_library"
+    deps = []
+    if (defined(invoker.deps)) {
+      deps += invoker.deps
+    }
+    foreach(dep, shared_data_deps) {
+      deps += [ "${dep}_install_content" ]
+    }
+    if (separate_install_targets_for_bundling) {
+      deps += [ ":copy_loader_app_lib${original_target_name}_bundle_content" ]
+    }
+  }
+}
+
 template("executable") {
   not_needed(invoker, [ "build_loader" ])
 
@@ -402,6 +498,10 @@ template("shared_library") {
         forward_variables_from(invoker, [ "testonly" ])
         sources = [ "//$starboard_path/starboard_loader.cc" ]
 
+        if (use_asan) {
+          sources += [ "//$starboard_path/sanitizer_options.cc" ]
+        }
+
         out_dir = rebase_path(root_build_dir)
         defines = [
           "SB_LOADER_MODULE=\"$actual_target_name\"",
@@ -448,6 +548,13 @@ template("shared_library") {
         bundle_name = shared_library_target_name
         bundle_deps = []
         bundle_deps = data_deps
+      }
+    }
+
+    if (sb_is_evergreen_compatible && sb_evergreen_compatible_package &&
+        target_name != "loader_app") {
+      evergreen_loader(original_target_name + "_evergreen_loader") {
+        forward_variables_from(invoker, "*")
       }
     }
 

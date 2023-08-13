@@ -77,14 +77,23 @@ _FILTERED_TESTS = {
         # SbDrmGenerateSessionUpdateRequest().
         'SbDrmSessionTest.InvalidSessionUpdateRequestParams',
 
-        # TODO: b/288107039 This test crashed after NDK 25 upgrade, re-enable it.
-        'SbUndefinedBehaviorTest.CallThisPointerIsNullRainyDay',
-
         # TODO: b/288107692 This test crashed on arm64 after NDK 25 upgrade, re-enable it.
         'PixelTest.TooManyGlyphs',
 
         # TODO: Filter this test on a per-device basis.
         'SbMediaCanPlayMimeAndKeySystem.MinimumSupport',
+
+        # TODO: b/289281412 Make this test work on lab devices consistently.
+        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.PartialAudio/*',
+
+        # TODO: b/292319097 Make this test work on lab devices consistently.
+        'SbPlayerTest.MaxVideoCapabilities',
+
+        # TODO: b/292409536 Make this test fork on lab devices consistently.
+        'SbPlayerWriteSampleTests/SbPlayerWriteSampleTest.PartialAudioDiscardAll/*',
+
+        # TODO: b/280432564 Make this test work on lab devices consistently.
+        'SbAudioSinkTest.ContinuousAppend',
     ],
 }
 # pylint: enable=line-too-long

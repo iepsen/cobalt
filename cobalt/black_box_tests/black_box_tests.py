@@ -27,6 +27,7 @@ import sys
 import unittest
 
 from cobalt.black_box_tests import black_box_cobalt_runner
+from cobalt.black_box_tests import bbt_settings
 from cobalt.black_box_tests.proxy_server import ProxyServer
 from starboard.tools import abstract_launcher
 from starboard.tools import build
@@ -78,6 +79,7 @@ _TESTS_NO_SIGNAL = [
     'h5vcc_storage_write_verify_test',
     'http_cache',
     'persistent_cookie',
+    'scroll',
     'service_worker_add_to_cache_test',
     'service_worker_cache_keys_test',
     'service_worker_controller_activation_test',
@@ -89,6 +91,7 @@ _TESTS_NO_SIGNAL = [
     'service_worker_test',
     'service_worker_persist_test',
     'soft_mic_platform_service_test',
+    'telemetry_test',
     'text_encoding_test',
     'wasm_basic_test',
     'web_debugger',
@@ -108,7 +111,8 @@ _TESTS_NEEDING_DEEP_LINK = [
 ]
 # These tests can only run on Evergreen-compatible platforms.
 _TESTS_EVERGREEN_END_TO_END = [
-    'evergreen_verify_qa_channel_update_test',
+    # Temporary disable test to publish new SB 16 changes b/149243810
+    #'evergreen_verify_qa_channel_update_test',
 ]
 # Location of test files.
 _TEST_DIR_PATH = 'cobalt.black_box_tests.tests.'
@@ -153,6 +157,7 @@ class BlackBoxTestCase(unittest.TestCase):
         launcher_params=_launcher_params,
         url=url,
         target_params=all_target_params,
+        web_server_port=bbt_settings.default_web_server_port,
         **kwargs)
 
   def GetBindingAddress(self):
@@ -242,6 +247,11 @@ class BlackBoxTests(object):
     global _wpt_http_port
     _wpt_http_port = args.wpt_http_port or str(
         self.GetUnusedPort([_server_binding_address]))
+
+    # Port used to set up tunneling between host and device for testdata server.
+    sock = socket.socket()
+    sock.bind(('', 0))
+    bbt_settings.default_web_server_port = sock.getsockname()[1]
 
     # Proxy is only needed for WPT
     self.use_proxy = args.test_set in ['all', 'wpt']

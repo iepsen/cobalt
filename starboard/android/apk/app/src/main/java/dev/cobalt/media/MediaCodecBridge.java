@@ -38,6 +38,7 @@ import dev.cobalt.util.UsedByNative;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Locale;
+import java.util.Optional;
 
 /** A wrapper of the MediaCodec class. */
 @SuppressWarnings("unused")
@@ -82,7 +83,6 @@ class MediaCodecBridge {
   private boolean mFlushed;
   private long mLastPresentationTimeUs;
   private final String mMime;
-  private boolean mAdaptivePlaybackSupported;
   private double mPlaybackRate = 1.0;
   private int mFps = 30;
 
@@ -269,6 +269,7 @@ class MediaCodecBridge {
     private int mStatus;
     // May be null if mStatus is not MEDIA_CODEC_OK.
     private MediaFormat mFormat;
+    private Optional<Boolean> mFormatHasCropValues = Optional.empty();
 
     @SuppressWarnings("unused")
     @UsedByNative
@@ -277,18 +278,16 @@ class MediaCodecBridge {
       mFormat = null;
     }
 
-    @SuppressWarnings("unused")
-    @UsedByNative
-    private GetOutputFormatResult(int status, MediaFormat format) {
-      mStatus = status;
-      mFormat = format;
-    }
-
     private boolean formatHasCropValues() {
-      return mFormat.containsKey(KEY_CROP_RIGHT)
-          && mFormat.containsKey(KEY_CROP_LEFT)
-          && mFormat.containsKey(KEY_CROP_BOTTOM)
-          && mFormat.containsKey(KEY_CROP_TOP);
+      if (!mFormatHasCropValues.isPresent()) {
+        boolean hasCropValues =
+            mFormat.containsKey(KEY_CROP_RIGHT)
+                && mFormat.containsKey(KEY_CROP_LEFT)
+                && mFormat.containsKey(KEY_CROP_BOTTOM)
+                && mFormat.containsKey(KEY_CROP_TOP);
+        mFormatHasCropValues = Optional.of(hasCropValues);
+      }
+      return mFormatHasCropValues.get();
     }
 
     @SuppressWarnings("unused")
@@ -299,18 +298,38 @@ class MediaCodecBridge {
 
     @SuppressWarnings("unused")
     @UsedByNative
-    private int width() {
-      return formatHasCropValues()
-          ? mFormat.getInteger(KEY_CROP_RIGHT) - mFormat.getInteger(KEY_CROP_LEFT) + 1
-          : mFormat.getInteger(MediaFormat.KEY_WIDTH);
+    private int textureWidth() {
+      return mFormat.getInteger(MediaFormat.KEY_WIDTH);
     }
 
     @SuppressWarnings("unused")
     @UsedByNative
-    private int height() {
-      return formatHasCropValues()
-          ? mFormat.getInteger(KEY_CROP_BOTTOM) - mFormat.getInteger(KEY_CROP_TOP) + 1
-          : mFormat.getInteger(MediaFormat.KEY_HEIGHT);
+    private int textureHeight() {
+      return mFormat.getInteger(MediaFormat.KEY_HEIGHT);
+    }
+
+    @SuppressWarnings("unused")
+    @UsedByNative
+    private int cropLeft() {
+      return formatHasCropValues() ? mFormat.getInteger(KEY_CROP_LEFT) : -1;
+    }
+
+    @SuppressWarnings("unused")
+    @UsedByNative
+    private int cropTop() {
+      return formatHasCropValues() ? mFormat.getInteger(KEY_CROP_TOP) : -1;
+    }
+
+    @SuppressWarnings("unused")
+    @UsedByNative
+    private int cropRight() {
+      return formatHasCropValues() ? mFormat.getInteger(KEY_CROP_RIGHT) : -1;
+    }
+
+    @SuppressWarnings("unused")
+    @UsedByNative
+    private int cropBottom() {
+      return formatHasCropValues() ? mFormat.getInteger(KEY_CROP_BOTTOM) : -1;
     }
 
     @SuppressWarnings("unused")
@@ -427,7 +446,6 @@ class MediaCodecBridge {
       long nativeMediaCodecBridge,
       MediaCodec mediaCodec,
       String mime,
-      boolean adaptivePlaybackSupported,
       BitrateAdjustmentTypes bitrateAdjustmentType,
       int tunnelModeAudioSessionId) {
     if (mediaCodec == null) {
@@ -438,7 +456,6 @@ class MediaCodecBridge {
     mMime = mime; // TODO: Delete the unused mMime field
     mLastPresentationTimeUs = 0;
     mFlushed = true;
-    mAdaptivePlaybackSupported = adaptivePlaybackSupported;
     mBitrateAdjustmentType = bitrateAdjustmentType;
     mCallback =
         new MediaCodec.Callback() {
@@ -498,13 +515,16 @@ class MediaCodecBridge {
                 return;
               }
               nativeOnMediaCodecOutputFormatChanged(mNativeMediaCodecBridge);
+              if (mFrameRateEstimator != null) {
+                mFrameRateEstimator.reset();
+              }
             }
           }
         };
     mMediaCodec.setCallback(mCallback);
 
     // TODO: support OnFrameRenderedListener for non tunnel mode
-    if (tunnelModeAudioSessionId != -1 && Build.VERSION.SDK_INT >= 23) {
+    if (tunnelModeAudioSessionId != -1) {
       mTunnelModeFrameRendererListener =
           new MediaCodec.OnFrameRenderedListener() {
             @Override
@@ -549,12 +569,7 @@ class MediaCodecBridge {
     }
     MediaCodecBridge bridge =
         new MediaCodecBridge(
-            nativeMediaCodecBridge,
-            mediaCodec,
-            mime,
-            true,
-            BitrateAdjustmentTypes.NO_ADJUSTMENT,
-            -1);
+            nativeMediaCodecBridge, mediaCodec, mime, BitrateAdjustmentTypes.NO_ADJUSTMENT, -1);
 
     MediaFormat mediaFormat = createAudioFormat(mime, sampleRate, channelCount);
 
@@ -588,8 +603,10 @@ class MediaCodecBridge {
       long nativeMediaCodecBridge,
       String mime,
       String decoderName,
-      int width,
-      int height,
+      // `widthHint` and `heightHint` are used to create the Android video format, which don't have
+      // to be directly related to the resolution of the video.
+      int widthHint,
+      int heightHint,
       int fps,
       int maxWidth,
       int maxHeight,
@@ -649,10 +666,10 @@ class MediaCodecBridge {
             nativeMediaCodecBridge,
             mediaCodec,
             mime,
-            true,
             BitrateAdjustmentTypes.NO_ADJUSTMENT,
             tunnelModeAudioSessionId);
-    MediaFormat mediaFormat = createVideoDecoderFormat(mime, width, height, videoCapabilities);
+    MediaFormat mediaFormat =
+        createVideoDecoderFormat(mime, widthHint, heightHint, videoCapabilities);
 
     boolean shouldConfigureHdr =
         colorInfo != null && MediaCodecUtil.isHdrCapableVideoDecoder(mime, codecCapabilities);
@@ -756,14 +773,7 @@ class MediaCodecBridge {
     }
 
     if (!bridge.configureVideo(
-        mediaFormat,
-        surface,
-        crypto,
-        0,
-        true,
-        maxWidth,
-        maxHeight,
-        outCreateMediaCodecBridgeResult)) {
+        mediaFormat, surface, crypto, 0, maxWidth, maxHeight, outCreateMediaCodecBridgeResult)) {
       Log.e(TAG, "Failed to configure video codec.");
       bridge.release();
       // outCreateMediaCodecBridgeResult.mErrorMessage is set inside configureVideo() on error.
@@ -850,7 +860,7 @@ class MediaCodecBridge {
     try {
       mFlushed = true;
       mMediaCodec.flush();
-    } catch (IllegalStateException e) {
+    } catch (Exception e) {
       Log.e(TAG, "Failed to flush MediaCodec", e);
       return MEDIA_CODEC_ERROR;
     }
@@ -985,7 +995,7 @@ class MediaCodecBridge {
       cryptoInfo.set(
           numSubSamples, numBytesOfClearData, numBytesOfEncryptedData, keyId, iv, cipherMode);
 
-      if (Build.VERSION.SDK_INT >= 24 && cipherMode == MediaCodec.CRYPTO_MODE_AES_CBC) {
+      if (cipherMode == MediaCodec.CRYPTO_MODE_AES_CBC) {
         cryptoInfo.setPattern(new Pattern(blocksToEncrypt, blocksToSkip));
       } else if (blocksToEncrypt != 0 || blocksToSkip != 0) {
         Log.e(TAG, "Pattern encryption only supported for 'cbcs' scheme (CBC mode).");
@@ -1003,18 +1013,15 @@ class MediaCodecBridge {
             TAG,
             "Failed to queue secure input buffer: "
                 + "CryptoException.ERROR_INSUFFICIENT_OUTPUT_PROTECTION");
-        // Note that in Android OS version before 23, the MediaDrm class doesn't expose the current
-        // key ids it holds.  In such case the Starboard media stack is unable to notify Cobalt of
-        // the error via key statuses so MEDIA_CODEC_ERROR is returned instead to signal a general
-        // media codec error.
-        return Build.VERSION.SDK_INT >= 23
-            ? MEDIA_CODEC_INSUFFICIENT_OUTPUT_PROTECTION
-            : MEDIA_CODEC_ERROR;
+        return MEDIA_CODEC_INSUFFICIENT_OUTPUT_PROTECTION;
       }
       Log.e(
           TAG,
           "Failed to queue secure input buffer, CryptoException with error code "
               + e.getErrorCode());
+      return MEDIA_CODEC_ERROR;
+    } catch (IllegalArgumentException e) {
+      Log.e(TAG, "Failed to queue secure input buffer, IllegalArgumentException " + e);
       return MEDIA_CODEC_ERROR;
     } catch (IllegalStateException e) {
       Log.e(TAG, "Failed to queue secure input buffer, IllegalStateException " + e);
@@ -1052,37 +1059,25 @@ class MediaCodecBridge {
       Surface surface,
       MediaCrypto crypto,
       int flags,
-      boolean allowAdaptivePlayback,
       int maxSupportedWidth,
       int maxSupportedHeight,
       CreateMediaCodecBridgeResult outCreateMediaCodecBridgeResult) {
     try {
-      // If adaptive playback is turned off by request, then treat it as
-      // not supported.  Note that configureVideo is only called once
-      // during creation, else this would prevent re-enabling adaptive
-      // playback later.
-      if (!allowAdaptivePlayback) {
-        mAdaptivePlaybackSupported = false;
+      // Since we haven't passed the properties of the stream we're playing down to this level, from
+      // our perspective, we could potentially adapt up to 8k at any point. We thus request 8k
+      // buffers up front, unless the decoder claims to not be able to do 8k, in which case we're
+      // ok, since we would've rejected a 8k stream when canPlayType was called, and then use those
+      // decoder values instead. We only support 8k for API level 29 and above.
+      if (Build.VERSION.SDK_INT > 28) {
+        format.setInteger(MediaFormat.KEY_MAX_WIDTH, Math.min(7680, maxSupportedWidth));
+        format.setInteger(MediaFormat.KEY_MAX_HEIGHT, Math.min(4320, maxSupportedHeight));
+      } else {
+        // Android 5.0/5.1 seems not support 8K. Fallback to 4K until we get a
+        // better way to get maximum supported resolution.
+        format.setInteger(MediaFormat.KEY_MAX_WIDTH, Math.min(3840, maxSupportedWidth));
+        format.setInteger(MediaFormat.KEY_MAX_HEIGHT, Math.min(2160, maxSupportedHeight));
       }
 
-      if (mAdaptivePlaybackSupported) {
-        // Since we haven't passed the properties of the stream we're playing
-        // down to this level, from our perspective, we could potentially
-        // adapt up to 8k at any point. We thus request 8k buffers up front,
-        // unless the decoder claims to not be able to do 8k, in which case
-        // we're ok, since we would've rejected a 8k stream when canPlayType
-        // was called, and then use those decoder values instead. We only
-        // support 8k for API level 29 and above.
-        if (Build.VERSION.SDK_INT > 28) {
-          format.setInteger(MediaFormat.KEY_MAX_WIDTH, Math.min(7680, maxSupportedWidth));
-          format.setInteger(MediaFormat.KEY_MAX_HEIGHT, Math.min(4320, maxSupportedHeight));
-        } else {
-          // Android 5.0/5.1 seems not support 8K. Fallback to 4K until we get a
-          // better way to get maximum supported resolution.
-          format.setInteger(MediaFormat.KEY_MAX_WIDTH, Math.min(3840, maxSupportedWidth));
-          format.setInteger(MediaFormat.KEY_MAX_HEIGHT, Math.min(2160, maxSupportedHeight));
-        }
-      }
       maybeSetMaxInputSize(format);
       mMediaCodec.configure(format, surface, crypto, flags);
       mFrameRateEstimator = new FrameRateEstimator();
@@ -1112,11 +1107,11 @@ class MediaCodecBridge {
   }
 
   private static MediaFormat createVideoDecoderFormat(
-      String mime, int width, int height, VideoCapabilities videoCapabilities) {
+      String mime, int widthHint, int heightHint, VideoCapabilities videoCapabilities) {
     return MediaFormat.createVideoFormat(
         mime,
-        alignDimension(width, videoCapabilities.getWidthAlignment()),
-        alignDimension(height, videoCapabilities.getHeightAlignment()));
+        alignDimension(widthHint, videoCapabilities.getWidthAlignment()),
+        alignDimension(heightHint, videoCapabilities.getHeightAlignment()));
   }
 
   private static int alignDimension(int size, int alignment) {
@@ -1142,11 +1137,11 @@ class MediaCodecBridge {
       return;
     }
     int maxHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
-    if (mAdaptivePlaybackSupported && format.containsKey(MediaFormat.KEY_MAX_HEIGHT)) {
+    if (format.containsKey(MediaFormat.KEY_MAX_HEIGHT)) {
       maxHeight = Math.max(maxHeight, format.getInteger(MediaFormat.KEY_MAX_HEIGHT));
     }
     int maxWidth = format.getInteger(MediaFormat.KEY_WIDTH);
-    if (mAdaptivePlaybackSupported && format.containsKey(MediaFormat.KEY_MAX_WIDTH)) {
+    if (format.containsKey(MediaFormat.KEY_MAX_WIDTH)) {
       maxWidth = Math.max(maxHeight, format.getInteger(MediaFormat.KEY_MAX_WIDTH));
     }
     int maxPixels;
@@ -1191,14 +1186,6 @@ class MediaCodecBridge {
     } catch (Exception e) {
       Log.w(TAG, "MediaFormat.getInteger(KEY_MAX_INPUT_SIZE) failed with exception: ", e);
     }
-  }
-
-  @SuppressWarnings("unused")
-  @UsedByNative
-  private boolean isAdaptivePlaybackSupported(int width, int height) {
-    // If media codec has adaptive playback supported, then the max sizes
-    // used during creation are only hints.
-    return mAdaptivePlaybackSupported;
   }
 
   @SuppressWarnings("unused")
@@ -1311,11 +1298,7 @@ class MediaCodecBridge {
       case 6:
         return AudioFormat.CHANNEL_OUT_5POINT1;
       case 8:
-        if (Build.VERSION.SDK_INT >= 23) {
-          return AudioFormat.CHANNEL_OUT_7POINT1_SURROUND;
-        } else {
-          return AudioFormat.CHANNEL_OUT_7POINT1;
-        }
+        return AudioFormat.CHANNEL_OUT_7POINT1_SURROUND;
       default:
         return AudioFormat.CHANNEL_OUT_DEFAULT;
     }

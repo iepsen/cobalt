@@ -16,15 +16,20 @@
 
 #include "nb/first_fit_reuse_allocator.h"
 
+#include <memory>
+
 #include "nb/fixed_no_free_allocator.h"
 #include "nb/pointer_arithmetic.h"
-#include "nb/scoped_ptr.h"
-#include "nb/starboard_aligned_memory_deleter.h"
 #include "starboard/configuration.h"
+#include "starboard/memory.h"
 #include "starboard/types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
+
+struct AlignedMemoryDeleter {
+  void operator()(uint8_t* p) { SbMemoryDeallocateAligned(p); }
+};
 
 class FirstFitReuseAllocatorTest : public ::testing::Test {
  public:
@@ -37,7 +42,7 @@ class FirstFitReuseAllocatorTest : public ::testing::Test {
                       std::size_t allocation_increment = 0) {
     buffer_.reset(static_cast<uint8_t*>(
         SbMemoryAllocateAligned(nb::Allocator::kMinAlignment, kBufferSize)));
-    nb::scoped_ptr<nb::FixedNoFreeAllocator> fallback_allocator(
+    std::unique_ptr<nb::FixedNoFreeAllocator> fallback_allocator(
         new nb::FixedNoFreeAllocator(buffer_.get(), kBufferSize));
     allocator_.reset(new nb::FirstFitReuseAllocator(
         fallback_allocator.get(), initial_capacity, allocation_increment));
@@ -45,9 +50,9 @@ class FirstFitReuseAllocatorTest : public ::testing::Test {
     fallback_allocator_.swap(fallback_allocator);
   }
 
-  std::unique_ptr<uint8_t, nb::AlignedMemoryDeleter> buffer_;
-  nb::scoped_ptr<nb::FixedNoFreeAllocator> fallback_allocator_;
-  nb::scoped_ptr<nb::FirstFitReuseAllocator> allocator_;
+  std::unique_ptr<uint8_t, AlignedMemoryDeleter> buffer_;
+  std::unique_ptr<nb::FixedNoFreeAllocator> fallback_allocator_;
+  std::unique_ptr<nb::FirstFitReuseAllocator> allocator_;
 };
 
 }  // namespace

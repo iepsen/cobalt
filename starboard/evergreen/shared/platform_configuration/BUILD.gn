@@ -14,22 +14,23 @@
 
 config("platform_configuration") {
   ldflags = [
-    "--build-id",
-    "--gc-sections",
-    "-X",
-    "-v",
-    "-eh-frame-hdr",
-    "--fini=__cxa_finalize",
-    "-shared",
-    "-L$clang_base_path",
-    "-L/usr/lib",
-    "-L/lib",
-    "-nostdlib",
-    "--whole-archive",
-    "--no-whole-archive",
-    "-u GetEvergreenSabiString",
+    "-fuse-ld=lld",
+    "-Wl,--build-id",
+    "-Wl,--gc-sections",
+    "-Wl,-X",
+    "-Wl,-v",
+    "-Wl,-eh-frame-hdr",
+    "-Wl,--fini=__cxa_finalize",
+    "-Wl,-shared",
+    "-Wl,-L$clang_base_path",
+    "-Wl,-L/usr/lib",
+    "-Wl,-L/lib",
+    "-Wl,-u GetEvergreenSabiString",
   ]
 
+  if (sb_is_evergreen) {
+    ldflags += [ "-nostdlib" ]
+  }
   cflags = [
     "-ffunction-sections",
     "-fdata-sections",
@@ -91,11 +92,13 @@ config("platform_configuration") {
     cflags += [
       "-O0",
       "-frtti",
+      "-g",
     ]
   } else if (is_devel) {
     cflags += [
       "-O2",
       "-frtti",
+      "-g",
     ]
   } else {
     cflags += [
@@ -105,7 +108,6 @@ config("platform_configuration") {
   }
 
   if (is_clang) {
-    ldflags += [ "-nostdlib" ]
     cflags += [
       "-fcolor-diagnostics",
 
@@ -201,7 +203,7 @@ config("speed") {
 config("size") {
   cflags = [ "-Os" ]
   if (is_qa || is_gold) {
-    ldflags = [ "--icf=safe" ]
+    ldflags = [ "-Wl,--icf=safe" ]
   }
 }
 

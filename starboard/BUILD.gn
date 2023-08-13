@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import("//starboard/build/config/os_definitions.gni")
 import("//starboard/build/config/starboard_target_type.gni")
 
 group("gn_all") {
@@ -61,14 +62,7 @@ group("gn_all") {
     deps += [ "//third_party/lz4_lib:lz4" ]
 
     if (sb_is_evergreen_compatible) {
-      deps += [
-        "//third_party/crashpad/client",
-
-        # TODO(b/270858365): remove this dependency on the Starboard-based
-        # target (from the target toolchain) once Buildbot has been updated to
-        # use the native target (from native_target toolchain).
-        "//third_party/crashpad/handler",
-      ]
+      deps += [ "//third_party/crashpad/client" ]
       data_deps = [
         "//starboard/loader_app",
         "//third_party/crashpad/handler:crashpad_handler(//$starboard_path/toolchain:native_target)",
@@ -91,17 +85,21 @@ group("starboard") {
     "//starboard/client_porting/eztime",
   ]
 
-  if (sb_is_evergreen) {
+  if (sb_is_modular && current_toolchain == cobalt_toolchain) {
     public_deps += [
-      "//starboard/elf_loader:sabi_string",
       "//third_party/llvm-project/compiler-rt:compiler_rt",
       "//third_party/llvm-project/libcxx:cxx",
       "//third_party/llvm-project/libcxxabi:cxxabi",
       "//third_party/musl:c",
     ]
-    if (build_with_separate_cobalt_toolchain) {
-      data_deps = [ ":starboard_platform_group($starboard_toolchain)" ]
+    if (sb_is_evergreen) {
+      public_deps += [ "//starboard/elf_loader:sabi_string" ]
     } else {
+      data_deps = [ ":starboard_platform_group($starboard_toolchain)" ]
+    }
+
+    # TODO: b/295702296 Fix libunwind for modular builds.
+    if (sb_is_evergreen || is_host_os_win) {
       public_deps += [ "//third_party/llvm-project/libunwind:unwind_evergreen" ]
     }
   } else {
@@ -110,7 +108,7 @@ group("starboard") {
       "//starboard/common",
     ]
 
-    if (!build_with_separate_cobalt_toolchain) {
+    if (!sb_is_modular || sb_is_evergreen) {
       if (sb_is_evergreen_compatible) {
         public_deps += [ "//third_party/crashpad/wrapper" ]
       } else {
@@ -206,10 +204,17 @@ if (current_toolchain == starboard_toolchain) {
       sources = [ "//starboard/common/test_main.cc" ]
 
       public_deps = [
-        ":starboard",
+        ":starboard_with_main",
         "//testing/gmock",
         "//testing/gtest",
       ]
+    }
+  }
+
+  group("starboard_with_main") {
+    public_deps = [ ":starboard" ]
+    if (sb_is_modular && !sb_is_evergreen) {
+      public_deps += [ "//$starboard_path:starboard_platform_with_main" ]
     }
   }
 }
