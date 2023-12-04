@@ -1,7 +1,7 @@
----
-layout: doc
-title: "Set up your environment - Windows"
----
+Project: /youtube/cobalt/_project.yaml
+Book: /youtube/cobalt/_book.yaml
+
+# Set up your environment - Windows
 
 These instructions explain how Windows users can set up their Cobalt development
 environment, clone a copy of the Cobalt code repository, and build a Cobalt
@@ -27,10 +27,10 @@ into another machine and run the binary on that machine.
 
     <aside class="note">
       <b>Note:</b> By default, Cobalt's build system will check
-      C:\Program Files (x86)\ for the Visual Studio install directory. If you
-      installed it elsewhere, you can set the `VSINSTALLDIR` environment
+      <code>C:\Program Files (x86)\</code> for the Visual Studio install directory. If you
+      installed it elsewhere, you can set the <code>VSINSTALLDIR</code> environment
       variable to point to the correct location. For example
-      `C:/Program Files/Microsoft Visual Studio/2022/Professional`
+      <code>C:/Program Files/Microsoft Visual Studio/2022/Professional</code>
     </aside>
 
 1.  Install GN, which we use for our build system code. There are a few ways to
@@ -63,12 +63,12 @@ into another machine and run the binary on that machine.
     ```
 
     <aside class="note">
-      If you plan to contribute to the Cobalt codebase it is recommended that
-      you create your own
-      [fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/about-forks)
-      of the [Cobalt repository](https://github.com/youtube/cobalt), apply
-      changes to the fork, and then
-      [create a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
+      <b>Note:</b> If you plan to contribute to the Cobalt codebase it is
+      recommended that you create your own
+      <a href="https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/about-forks">fork</a>
+      of the <a href="https://github.com/youtube/cobalt">Cobalt repository</a>,
+      apply changes to the fork, and then
+      <a href="https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork">create a pull request</a>
       to merge those changes into the Cobalt repository.
     </aside>
 
@@ -138,10 +138,11 @@ into another machine and run the binary on that machine.
     The previous command contains three variables:
 
     1.  `<platform>` is the [platform
-        configuration](/starboard/porting.html#1-enumerate-and-name-your-platform-configurations)
+        configuration](../starboard/porting.md#1-enumerate-and-name-your-platform-configurations)
         that identifies the platform. As described in the Starboard porting
         guide, it contains a `family name` (like `linux`) and a
-        `binary variant` (like `x64x11`), separated by a hyphen.
+        `binary variant` (like `x64x11`), separated by a hyphen. For Windows
+        builds use win-win32.
     1.  `<build_type>` is the build you are compiling. Possible values are
         `debug`, `devel`, `qa`, and `gold`.
     1.  `<target_name>` is the name assigned to the compiled code and it is
@@ -222,10 +223,10 @@ and intended to be overwritten by developers creating their own app with Cobalt,
 but they should work for local testing.
 
 <aside class="note">
-  <b>Note:</b> if you change the value of `PUBLISHER` in
-  `appx_product_settings.py` you <b>must</b> regenerate a pfx file in order for
-  the packaging step below to work correctly. Follow the instructions in
-  `starboard/xb1/cert/README.md` to generate your own pfx.
+  <b>Note:</b> if you change the value of <code>PUBLISHER</code> in
+  <code>appx_product_settings.py</code> you <b>must</b> regenerate a pfx file in
+  order for the packaging step below to work correctly. Follow the instructions
+  in <code>starboard/xb1/cert/README.md</code> to generate your own pfx.
 </aside>
 
 ### Build Cobalt

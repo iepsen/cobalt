@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import("//starboard/build/config/os_definitions.gni")
+
 target(gtest_target_type, "nplb") {
   testonly = true
 
@@ -165,9 +167,7 @@ target(gtest_target_type, "nplb") {
     "speech_synthesis_basic_test.cc",
     "state_machine_test.cc",
     "storage_close_record_test.cc",
-    "storage_delete_record_test.cc",
     "storage_get_record_size_test.cc",
-    "storage_open_record_test.cc",
     "storage_read_record_test.cc",
     "storage_write_record_test.cc",
     "string_compare_no_case_n_test.cc",
@@ -231,14 +231,10 @@ target(gtest_target_type, "nplb") {
     "window_get_size_test.cc",
   ]
 
-  configs += [
-    "//build/config/compiler:exceptions",
-    "//starboard/build/config:starboard_implementation",
-  ]
-  configs -= [ "//build/config/compiler:no_exceptions" ]
+  configs += [ "//starboard/build/config:starboard_implementation" ]
 
   deps = [
-    "//starboard",
+    "//starboard:starboard_group",
     "//starboard/common",
     "//starboard/nplb/compiler_compliance:cpp14_supported",
     "//starboard/shared/starboard/media:media_util",
@@ -267,5 +263,33 @@ target(gtest_target_type, "nplb") {
   if (is_clang_16) {
     # signedness_and_size_of_enum_test.cc casts -1 to enum value
     cflags = [ "-Wno-enum-constexpr-conversion" ]
+  }
+
+  #  TODO: b/297808555 - Add these tests for all  modular builds.
+  if (sb_has_unused_symbol_issue) {
+    sources -= [
+      "maximum_player_configuration_explorer.cc",
+      "maximum_player_configuration_explorer.h",
+      "maximum_player_configuration_explorer_test.cc",
+      "media_buffer_test.cc",
+      "media_set_audio_write_duration_test.cc",
+      "multiple_player_test.cc",
+      "player_create_test.cc",
+      "player_creation_param_helpers.cc",
+      "player_creation_param_helpers.h",
+      "player_get_audio_configuration_test.cc",
+      "player_get_preferred_output_mode_test.cc",
+      "player_test_fixture.cc",
+      "player_test_fixture.h",
+      "player_test_util.cc",
+      "player_test_util.h",
+      "player_write_sample_test.cc",
+      "vertical_video_test.cc",
+    ]
+
+    deps -= [
+      "//starboard/shared/starboard/media:media_util",
+      "//starboard/shared/starboard/player:video_dmp",
+    ]
   }
 }

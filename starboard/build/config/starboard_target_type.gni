@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import("//starboard/build/config/os_definitions.gni")
 declare_args() {
   starboard_target_type = ""
+  starboard_shared_library_extension = "so.${sb_api_version}"
 }
 
 if (starboard_target_type == "") {
@@ -21,5 +23,39 @@ if (starboard_target_type == "") {
     starboard_target_type = "shared_library"
   } else {
     starboard_target_type = "group"
+  }
+}
+
+template("starboard_platform_target") {
+  target_type = starboard_target_type
+  if (defined(invoker.target_type)) {
+    target_type = invoker.target_type
+  }
+  target(target_type, target_name) {
+    forward_variables_from(invoker, [ "extra_configs" ])
+
+    if (defined(invoker.extra_configs)) {
+      configs += extra_configs
+    }
+    if (target_type == "shared_library") {
+      build_loader = false
+      if (!is_host_win) {
+        output_extension = starboard_shared_library_extension
+      }
+    }
+    public_deps = [
+      "//starboard/client_porting/cwrappers",
+      "//starboard/client_porting/eztime",
+      "//starboard/common",
+      "//starboard/egl_and_gles",
+    ]
+    if (sb_is_evergreen_compatible) {
+      public_deps += [ "//third_party/crashpad/wrapper" ]
+    } else {
+      public_deps += [ "//third_party/crashpad/wrapper:wrapper_stub" ]
+    }
+    if (!sb_is_evergreen) {
+      public_deps += [ "//$starboard_path:starboard_platform" ]
+    }
   }
 }
