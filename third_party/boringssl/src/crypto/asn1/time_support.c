@@ -76,8 +76,7 @@ struct tm *OPENSSL_gmtime(const time_t *time, struct tm *result) {
   }
   return result;
 #else  // !defined(OPENSSL_WINDOWS)
-  result = gmtime(time);
-  return result;
+  return gmtime_r(time, result);
 #endif  // defined(OPENSSL_WINDOWS)
 #endif  // defined(OPENSSL_SYS_STARBOARD)
 }
