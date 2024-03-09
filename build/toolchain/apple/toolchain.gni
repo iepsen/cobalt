@@ -273,7 +273,7 @@ template("apple_toolchain") {
       } else {
         rspfile_content = "{{inputs}}"
         ar = "${prefix}llvm-ar"
-        command = "\"$ar\" {{arflags}} -r -c -s -D {{output}} \"@$rspfile\""
+        command = "\"$ar\" {{arflags}} -r -c -s {{output}} \"@$rspfile\""
 
         # Remove the output file first so that ar doesn't try to modify the
         # existing file.
